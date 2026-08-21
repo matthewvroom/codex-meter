@@ -56,6 +56,21 @@ struct ActivityCheck {
         precondition(abs(DisplayCurrency.eur.convertFromUSD(1) - (1 / 1.1405)) < 0.0000001)
         precondition(abs(DisplayCurrency.aud.convertFromUSD(1) - (1.6428 / 1.1405)) < 0.0000001)
 
+        let dateParts = Calendar.current.dateComponents([.year, .month, .day], from: now)
+        let largeRoot = root
+            .appendingPathComponent(String(dateParts.year!), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", dateParts.month!), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", dateParts.day!), isDirectory: true)
+        try FileManager.default.createDirectory(at: largeRoot, withIntermediateDirectories: true)
+        try Data(records.utf8).write(to: largeRoot.appendingPathComponent("rollout-large.jsonl"))
+        let summarized = try await LocalActivityScanner(
+            roots: [largeRoot],
+            largeFileThresholdBytes: 1,
+            largeFileTailBytes: 1_024 * 1_024
+        ).scan(days: 7)
+        precondition(summarized.summarizedLargeFiles == 1)
+        precondition(summarized.total.totalTokens == 220)
+
         let unknownRoot = root.appendingPathComponent("unknown", isDirectory: true)
         try FileManager.default.createDirectory(at: unknownRoot, withIntermediateDirectories: true)
         try Data((event(at: 0, input: 10, cached: 0, output: 2, total: 12) + "\n").utf8)

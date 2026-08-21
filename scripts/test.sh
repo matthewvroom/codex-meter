@@ -12,16 +12,35 @@ swiftc \
 "$TMP/parser-check"
 
 swiftc \
+  "$ROOT/Sources/CodexMeterCore/RateLimitModels.swift" \
+  "$ROOT/Tests/WeeklyPaceCheck.swift" \
+  -o "$TMP/weekly-pace-check"
+"$TMP/weekly-pace-check"
+
+swiftc \
   "$ROOT/Sources/CodexMeterCore/LocalActivity.swift" \
   "$ROOT/Tests/ActivityCheck.swift" \
   -o "$TMP/activity-check"
 "$TMP/activity-check"
 
 swiftc \
+  "$ROOT/Sources/CodexMeterCore/ActivityRefreshDemand.swift" \
+  "$ROOT/Tests/ActivityRefreshDemandCheck.swift" \
+  -o "$TMP/activity-refresh-demand-check"
+"$TMP/activity-refresh-demand-check"
+
+swiftc \
   "$ROOT/Sources/CodexMeterCore/AccountProfileStorage.swift" \
   "$ROOT/Tests/AccountProfileStorageCheck.swift" \
   -o "$TMP/account-profile-storage-check"
 "$TMP/account-profile-storage-check"
+
+swiftc \
+  "$ROOT/Sources/CodexMeterCore/RateLimitModels.swift" \
+  "$ROOT/Sources/CodexMeterCore/CodexAppServerClient.swift" \
+  "$ROOT/Tests/AppServerHandshakeCheck.swift" \
+  -o "$TMP/app-server-handshake-check"
+"$TMP/app-server-handshake-check"
 
 if [[ "${SKIP_LIVE_CODEX_CHECK:-0}" != "1" ]]; then
   swiftc \
@@ -34,8 +53,9 @@ fi
 
 swift build --package-path "$ROOT"
 "$ROOT/.build/debug/codex-meter" --help >/dev/null
-"$ROOT/.build/debug/codex-meter" history --days 1 --json >/dev/null
-"$ROOT/.build/debug/codex-meter" history --days 1 --currency AUD --json | /usr/bin/grep -q '"currency":"AUD"'
+mkdir -p "$TMP/activity-root"
+CODEX_METER_ACTIVITY_ROOT="$TMP/activity-root" "$ROOT/.build/debug/codex-meter" history --days 1 --json >/dev/null
+CODEX_METER_ACTIVITY_ROOT="$TMP/activity-root" "$ROOT/.build/debug/codex-meter" history --days 1 --currency AUD --json | /usr/bin/grep -q '"currency":"AUD"'
 
 set +e
 "$ROOT/.build/debug/codex-meter" history --days 0 >/dev/null 2>&1

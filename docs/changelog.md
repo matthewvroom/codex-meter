@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.6.3 — 2026-08-21
+
+- Refine the borderless badge typography and add a symmetric, one-pixel center pace marker with a knockout through the rail.
+
+## 1.6.2 — 2026-08-21
+
+- Remove the filled weekly badge capsule and render its countdown, percentage and pace marks directly as adaptive template elements.
+
+## 1.6.1 — 2026-08-21
+
+- Render the compact weekly badge with a Retina bitmap, wider insets and more breathing room.
+- Prevent the account picker from taking focus whenever the popover opens.
+- Clarify pace summaries with `usage is ...` phrasing.
+- Summarize oversized local session logs so Local Activity remains responsive on very large Codex histories.
+
+## 1.6.0 — 2026-08-21
+
+- Added a knockout weekly badge combining reset countdown, remaining percentage and pace.
+- Added a shared weekly pace model with a progressive `−50%` to `+50%` scale and human-readable time translation.
+- Added expanded pace details, usage-bar ticks and explicit remaining-percentage labeling.
+- Capped oversized popovers with scrolling while preserving natural height for compact states.
+- Compact Local Activity now shows the top four models first and keeps long costs on one line.
+- Moved API-equivalent comparisons into a clearly labelled Estimates disclosure and removed hypothetical savings from the menu bar and celebrations.
+- Changed local session-log scanning to run on demand unless the activity-chart menu mode needs periodic updates.
+
+## 1.5.4 — 2026-08-18
+
+- Prefer the current native Codex app helper over older Homebrew and npm launchers.
+- Supply GUI-launched helper processes with Homebrew and local binary paths so script-based fallbacks can find Node.
+- Added deterministic coverage for helper selection order after Codex or macOS updates.
+
+## 1.5.3 — 2026-08-17
+
+- Increased the countdown numerals for easier at-a-glance reading while keeping the `d` and `h` suffixes compact.
+
+## 1.5.2 — 2026-08-17
+
+- Added a Reset + percentage menu-bar mode with a compact stacked days-and-hours countdown.
+- Kept the countdown and adjacent percentage tied to the same most-constrained usage window.
+- Added exact local reset details to the menu-bar tooltip and accessibility label.
+- Added deterministic countdown formatting and tied-window selection checks.
+
+## 1.5.1 — 2026-08-17
+
+- Made the existing default Codex/ChatGPT profile the stable zero-setup account and migrated earlier random default-profile identifiers.
+- Fixed successful default-profile refreshes clearing stale optional-login errors.
+- Added protocol-stage diagnostics and a Copy Diagnostics action for usage failures.
+- Replaced Add Account's silent CLI subprocess with the supported app-server browser-login flow.
+- Kept optional profiles Meter-only and removed the inherited path that could sign the main Codex app out.
+- Made the exact local reset date and time visible beside the relative reset countdown.
+- Added a deterministic fake app-server integration check that enforces initialize-response ordering before `account/rateLimits/read`.
+- Added a live windowed QA launch mode for testing the same view used by the menu-bar popover.
+
 ## 1.5.0 — 2026-07-15
 
 - Moved the named account switcher beside refresh with an explicit down-arrow affordance.

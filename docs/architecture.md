@@ -23,7 +23,7 @@ The app intentionally does not consume rate-limit reset credits or expose conver
 
 The scanner discovers recent `.jsonl` files under `~/.codex/sessions` and `~/.codex/archived_sessions`. It uses local `/usr/bin/grep` prefiltering before strict decoding of only `turn_context` and `token_count` records. Candidate lines briefly enter process memory; only the latest bounded model ID, timestamps and numeric cumulative totals are retained. Each positive delta is attributed to the latest preceding model in physical record order. Per-rollout non-negative deltas ignore repeated counters, handle resets and deduplicate archived copies through stable rollout identity plus cumulative fingerprints.
 
-The first seven-day scan is bounded to recently modified logs. Results are cached in memory and refreshed every ten minutes, while quota checks remain on a separate two-minute schedule. No helper daemon remains running between scans.
+The first seven-day scan is bounded to recently modified logs. Results are cached in memory for at least ten minutes. Scans run when Local Activity is opened, when the user manually refreshes, or periodically while the activity-chart menu mode is selected; quota checks remain on a separate two-minute schedule. No helper daemon remains running between scans.
 
 ## Cost estimates
 
@@ -31,7 +31,7 @@ The first seven-day scan is bounded to recently modified logs. Results are cache
 
 `DisplayCurrency` converts the USD base estimate to USD, AUD or EUR using a dated ECB reference-rate snapshot. The selected app currency is a local preference; the CLI can optionally override the USD-to-selected-currency rate. No live FX request runs in the app.
 
-Savings are intentionally an estimate: each known model's API-equivalent cost is compared with the same token usage priced as GPT-5.6 Sol. Milestone banners are local-only UI state and are triggered at savings, token, low-usage and reset-credit transitions. Banked resets come directly from `rateLimitResetCredits.availableCount`; the UI shows unavailable rather than inferring a value when that field is absent.
+The hypothetical model-price difference is intentionally an estimate: each known model's API-equivalent cost is compared with the same token usage priced as GPT-5.6 Sol. It appears only in the Estimates disclosure and is not presented as realized savings. Milestone banners are local-only UI state and are triggered at token, low-usage and reset-credit transitions. Banked resets come directly from `rateLimitResetCredits.availableCount`; the UI shows unavailable rather than inferring a value when that field is absent.
 
 Cached input is a subset of input, so estimates price non-cached input as `input - cached`, then apply model-specific input, cached-input and output rates. Reasoning output is not added again because it is contained in output totals. Aggregate logs cannot reliably reveal request-level pricing adjustments such as long context, so the UI always calls the result an API-equivalent estimate rather than a bill.
 

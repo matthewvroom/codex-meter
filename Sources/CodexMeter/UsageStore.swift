@@ -6,6 +6,7 @@ import UserNotifications
 
 enum MenuBarDisplayMode: String, CaseIterable, Identifiable {
     case iconAndPercentage
+    case resetAndPercentage
     case percentage
     case icon
     case activity
@@ -14,6 +15,7 @@ enum MenuBarDisplayMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .iconAndPercentage: return "Icon + percentage"
+        case .resetAndPercentage: return "Reset + percentage"
         case .percentage: return "Percentage only"
         case .icon: return "Icon only"
         case .activity: return "Activity chart"
@@ -40,17 +42,23 @@ struct Celebration: Equatable, Identifiable {
 
 @MainActor
 final class UsageStore: ObservableObject {
+    private static let defaultAccountID = UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
     @Published private(set) var payload: RateLimitPayload?
     @Published private(set) var isRefreshing = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var accountErrorMessage: String?
     @Published private(set) var activity: LocalActivitySnapshot?
     @Published private(set) var activityError: String?
+    @Published private(set) var isActivityRefreshing = false
     @Published var alertThreshold: Int {
         didSet { UserDefaults.standard.set(alertThreshold, forKey: Self.thresholdKey) }
     }
     @Published private(set) var launchAtLogin = false
     @Published var displayMode: MenuBarDisplayMode {
-        didSet { UserDefaults.standard.set(displayMode.rawValue, forKey: Self.displayModeKey) }
+        didSet {
+            UserDefaults.standard.set(displayMode.rawValue, forKey: Self.displayModeKey)
+            updateActivityDemand()
+        }
     }
     @Published var inputRate: Double { didSet { persistRates() } }
     @Published var cachedInputRate: Double { didSet { persistRates() } }
@@ -63,15 +71,20 @@ final class UsageStore: ObservableObject {
         didSet { UserDefaults.standard.set(activeAccountID.uuidString, forKey: Self.activeAccountKey) }
     }
     @Published private(set) var celebration: Celebration?
-    @Published private(set) var isSwitchingCodexAccount = false
-    @Published private(set) var accountSwitchStatus: String?
-
     private var client: CodexAppServerClient
     private let activityScanner = LocalActivityScanner()
     private let previewMode: Bool
     private var pollingTask: Task<Void, Never>?
     private var activityPollingTask: Task<Void, Never>?
-    private var loginProcesses: [UUID: Process] = [:]
+    private var popoverVisible = false
+    private var localActivityExpanded = true
+    private var currentActivityDemand = ActivityRefreshDemand(
+        popoverVisible: false,
+        sectionExpanded: true,
+        activityDisplaySelected: false
+    )
+    private var loginTasks: [UUID: Task<Void, Never>] = [:]
+    private var lastUsageDiagnostics: String?
     private static let thresholdKey = "alertThreshold"
     private static let notifiedResetKey = "lastNotifiedReset"
     private static let displayModeKey = "menuBarDisplayMode"
@@ -81,30 +94,34 @@ final class UsageStore: ObservableObject {
     private static let currencyKey = "displayCurrency"
     private static let accountsKey = "accountProfiles"
     private static let activeAccountKey = "activeAccountID"
-    private static let savingsMilestoneKey = "lastSavingsMilestoneUSD"
     private static let tokenMilestoneKey = "lastTokenMilestone"
     private static let resetMilestoneKey = "lastBankedReset"
 
     init(previewMode: Bool = false) {
-        let defaultAccount = AccountProfile(id: UUID(), name: "Default", homePath: nil, email: nil)
+        let defaultAccount = AccountProfile(id: Self.defaultAccountID, name: "Default", homePath: nil, email: nil)
         let loadedAccounts: [AccountProfile]
         if let data = UserDefaults.standard.data(forKey: Self.accountsKey),
            let decoded = try? JSONDecoder().decode([AccountProfile].self, from: data), !decoded.isEmpty {
-            loadedAccounts = decoded
+            let separateAccounts = decoded.filter { $0.homePath != nil }
+            loadedAccounts = [defaultAccount] + separateAccounts
         } else {
             loadedAccounts = [defaultAccount]
         }
         let savedAccount = UserDefaults.standard.string(forKey: Self.activeAccountKey).flatMap(UUID.init(uuidString:))
-        let chosenAccountID = savedAccount.flatMap { candidate in
+        let migratedSavedAccount = savedAccount.flatMap { candidate in
+            decodedDefaultID(from: UserDefaults.standard.data(forKey: Self.accountsKey)) == candidate
+                ? Self.defaultAccountID
+                : candidate
+        }
+        let chosenAccountID = migratedSavedAccount.flatMap { candidate in
             loadedAccounts.contains(where: { $0.id == candidate }) ? candidate : nil
-        } ?? loadedAccounts[0].id
+        } ?? Self.defaultAccountID
         self.previewMode = previewMode
         self.accounts = loadedAccounts
         self.activeAccountID = chosenAccountID
         self.client = CodexAppServerClient(codexHome: loadedAccounts.first(where: { $0.id == chosenAccountID })?.homeURL)
-        if UserDefaults.standard.data(forKey: Self.accountsKey) == nil {
-            UserDefaults.standard.set(try? JSONEncoder().encode(loadedAccounts), forKey: Self.accountsKey)
-        }
+        UserDefaults.standard.set(try? JSONEncoder().encode(loadedAccounts), forKey: Self.accountsKey)
+        UserDefaults.standard.set(chosenAccountID.uuidString, forKey: Self.activeAccountKey)
         let saved = UserDefaults.standard.integer(forKey: Self.thresholdKey)
         alertThreshold = saved == 0 ? 20 : saved
         displayMode = MenuBarDisplayMode(rawValue: UserDefaults.standard.string(forKey: Self.displayModeKey) ?? "") ?? .iconAndPercentage
@@ -160,8 +177,11 @@ final class UsageStore: ObservableObject {
     }
     var totalSavings: Double { currency.convertFromUSD(totalSavingsUSD) }
     var menuBarRemaining: Int? {
+        menuBarWindow?.remainingPercent
+    }
+    var menuBarWindow: RateLimitWindow? {
         guard errorMessage == nil, !isStale else { return nil }
-        return payload?.snapshot.mostConstrainedRemaining
+        return payload?.snapshot.mostConstrainedWindow
     }
     var planLabel: String? {
         payload?.snapshot.planType?.replacingOccurrences(of: "_", with: " ").capitalized
@@ -185,26 +205,58 @@ final class UsageStore: ObservableObject {
                 await refresh()
             }
         }
-        activityPollingTask?.cancel()
-        activityPollingTask = Task {
-            await refreshActivity()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(600))
-                guard !Task.isCancelled else { break }
-                await refreshActivity()
-            }
+        updateActivityDemand()
+    }
+
+    func refreshActivity(force: Bool = false) async {
+        guard !isActivityRefreshing else { return }
+        if !force, let sampledAt = activity?.sampledAt,
+           Date().timeIntervalSince(sampledAt) < 600 { return }
+        isActivityRefreshing = true
+        defer { isActivityRefreshing = false }
+        do {
+            activity = try await activityScanner.scan(days: 7)
+            activityError = nil
+            detectTokenMilestone(current: activity)
+        } catch is CancellationError {
+            return
+        } catch {
+            activityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
-    func refreshActivity() async {
-        do {
-            let previous = activity
-            activity = try await activityScanner.scan(days: 7)
-            activityError = nil
-            detectActivityMilestones(previous: previous, current: activity)
-        } catch {
-            activity = nil
-            activityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    func setPopoverVisible(_ visible: Bool) {
+        popoverVisible = visible
+        updateActivityDemand()
+    }
+
+    func setLocalActivityExpanded(_ expanded: Bool) {
+        localActivityExpanded = expanded
+        updateActivityDemand()
+    }
+
+    private func updateActivityDemand() {
+        guard !previewMode else { return }
+        let demand = ActivityRefreshDemand(
+            popoverVisible: popoverVisible,
+            sectionExpanded: localActivityExpanded,
+            activityDisplaySelected: displayMode == .activity
+        )
+        guard demand != currentActivityDemand else { return }
+        currentActivityDemand = demand
+        activityPollingTask?.cancel()
+        activityPollingTask = nil
+        if demand.requiresPolling {
+            activityPollingTask = Task {
+                await refreshActivity()
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(600))
+                    guard !Task.isCancelled else { break }
+                    await refreshActivity()
+                }
+            }
+        } else if demand.requiresRefresh {
+            activityPollingTask = Task { await refreshActivity() }
         }
     }
 
@@ -217,12 +269,32 @@ final class UsageStore: ObservableObject {
             let previous = payload
             payload = newPayload
             errorMessage = newPayload.snapshot.windows.isEmpty ? "No Codex rate-limit windows were returned for this account." : nil
+            if errorMessage == nil {
+                lastUsageDiagnostics = nil
+                accountErrorMessage = nil
+            }
             await notifyIfNeeded(newPayload)
             detectBankedResetMilestone(previous: previous, current: newPayload)
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            lastUsageDiagnostics = await client.diagnosticSummary()
             await client.stop()
         }
+    }
+
+    func copyUsageDiagnostics() {
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
+        let text = [
+            "Codex Meter diagnostics",
+            "Version: \(appVersion)",
+            "Time: \(Date().formatted(date: .numeric, time: .standard))",
+            "Active profile: \(activeAccountName) (\(activeAccountID == Self.defaultAccountID ? "default CODEX_HOME" : "isolated CODEX_HOME"))",
+            "Last successful refresh: \(payload?.fetchedAt.formatted(date: .numeric, time: .standard) ?? "none")",
+            "Usage error: \(errorMessage ?? "none")",
+            lastUsageDiagnostics ?? "Protocol diagnostics: unavailable"
+        ].joined(separator: "\n")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -230,7 +302,7 @@ final class UsageStore: ObservableObject {
         do {
             if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch {
-            errorMessage = "Launch at login could not be changed: \(error.localizedDescription)"
+            accountErrorMessage = "Launch at login could not be changed: \(error.localizedDescription)"
         }
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
@@ -245,13 +317,13 @@ final class UsageStore: ObservableObject {
         let discoveredURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex")
         let fallbackURL = URL(fileURLWithPath: "/Applications/ChatGPT.app")
         guard let appURL = discoveredURL ?? (FileManager.default.fileExists(atPath: fallbackURL.path) ? fallbackURL : nil) else {
-            errorMessage = "Codex is not installed in /Applications."
+            accountErrorMessage = "Codex is not installed in /Applications."
             return
         }
         NSWorkspace.shared.openApplication(at: appURL, configuration: .init()) { [weak self] _, error in
             Task { @MainActor in
                 if let error {
-                    self?.errorMessage = "Codex could not be opened: \(error.localizedDescription)"
+                    self?.accountErrorMessage = "Codex could not be opened: \(error.localizedDescription)"
                 } else if let settingsURL {
                     _ = NSWorkspace.shared.open(settingsURL)
                 }
@@ -261,32 +333,7 @@ final class UsageStore: ObservableObject {
 
     func requestAccountSwitch(to id: UUID) {
         guard accounts.contains(where: { $0.id == id }), id != activeAccountID else { return }
-        guard let profile = accounts.first(where: { $0.id == id }) else { return }
-
-        let alert = NSAlert()
-        alert.messageText = "Switch to \(profile.displayName)?"
-        alert.informativeText = profile.homeURL == nil
-            ? "This is the Codex desktop profile. Codex Meter will switch its usage view to the account currently signed in there."
-            : "Choose whether to switch only Codex Meter, or also sign the Codex desktop app out and open OpenAI's secure browser login for this account."
-        if profile.homeURL == nil {
-            alert.addButton(withTitle: "Switch Meter")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            switchMeterAccount(to: id)
-            return
-        }
-        alert.addButton(withTitle: "Meter + Codex")
-        alert.addButton(withTitle: "Meter Only")
-        alert.addButton(withTitle: "Cancel")
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            switchMeterAccount(to: id)
-            Task { await switchCodexDesktopAccount(to: profile) }
-        case .alertSecondButtonReturn:
-            switchMeterAccount(to: id)
-        default:
-            return
-        }
+        switchMeterAccount(to: id)
     }
 
     private func switchMeterAccount(to id: UUID) {
@@ -332,7 +379,7 @@ final class UsageStore: ObservableObject {
             persistAccounts()
             startLogin(for: profile)
         } catch {
-            errorMessage = "The account profile could not be created: \(error.localizedDescription)"
+            accountErrorMessage = "The account profile could not be created: \(error.localizedDescription)"
         }
     }
 
@@ -358,7 +405,7 @@ final class UsageStore: ObservableObject {
         Task {
             if wasActive { await client.stop() }
             do {
-                loginProcesses.removeValue(forKey: profile.id)?.terminate()
+                loginTasks.removeValue(forKey: profile.id)?.cancel()
                 try AccountProfileStorage.removeLocalProfile(at: home)
                 accounts.removeAll { $0.id == profile.id }
                 persistAccounts()
@@ -376,75 +423,56 @@ final class UsageStore: ObservableObject {
                     client = CodexAppServerClient(codexHome: profile.homeURL)
                     start()
                 }
-                errorMessage = "The local account could not be deleted: \(error.localizedDescription)"
+                accountErrorMessage = "The local account could not be deleted: \(error.localizedDescription)"
             }
         }
     }
 
     private func startLogin(for profile: AccountProfile) {
-        guard let executable = CodexAppServerClient.locateExecutable(), let home = profile.homeURL else { return }
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = ["login"]
-        var environment = ProcessInfo.processInfo.environment
-        environment["CODEX_HOME"] = home.path
-        process.environment = environment
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        process.terminationHandler = { [weak self] finished in
-            Task { @MainActor in
-                self?.finishLogin(profileID: profile.id, succeeded: finished.terminationStatus == 0)
+        guard let home = profile.homeURL else { return }
+        accountErrorMessage = nil
+        loginTasks[profile.id]?.cancel()
+        loginTasks[profile.id] = Task { [weak self] in
+            guard let self else { return }
+            let loginClient = CodexAppServerClient(codexHome: home)
+            do {
+                let login = try await loginClient.startChatGPTLogin()
+                guard NSWorkspace.shared.open(login.authorizationURL) else {
+                    throw CodexClientError.server("The OpenAI sign-in page could not be opened in your browser.")
+                }
+                try await loginClient.waitForLogin(id: login.id)
+                guard let account = try await loginClient.readAccount(refreshToken: true) else {
+                    throw CodexClientError.server("Codex did not report a signed-in account after login.")
+                }
+                await loginClient.stop()
+                self.loginTasks.removeValue(forKey: profile.id)
+                if let index = self.accounts.firstIndex(where: { $0.id == profile.id }) {
+                    self.accounts[index].email = account.email
+                    self.persistAccounts()
+                }
+                self.switchMeterAccount(to: profile.id)
+                self.celebration = Celebration(title: "Account ready", subtitle: "Secure sign-in completed", symbol: "person.crop.circle.badge.checkmark")
+                self.dismissCelebration()
+            } catch is CancellationError {
+                await loginClient.stop()
+            } catch {
+                await loginClient.stop()
+                self.loginTasks.removeValue(forKey: profile.id)
+                self.accounts.removeAll { $0.id == profile.id }
+                self.persistAccounts()
+                try? AccountProfileStorage.removeLocalProfile(at: home)
+                self.accountErrorMessage = "OpenAI sign-in failed: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
             }
         }
-        do {
-            try process.run()
-            loginProcesses[profile.id] = process
-        } catch {
-            errorMessage = "Codex login could not be started: \(error.localizedDescription)"
-        }
-    }
-
-    private func finishLogin(profileID: UUID, succeeded: Bool) {
-        loginProcesses.removeValue(forKey: profileID)
-        guard succeeded else {
-            accounts.removeAll { $0.id == profileID }
-            persistAccounts()
-            errorMessage = "The OpenAI sign-in was cancelled or did not complete. You can add the account again when ready."
-            return
-        }
-        Task { await finishSuccessfulLogin(profileID: profileID) }
-    }
-
-    private func finishSuccessfulLogin(profileID: UUID) async {
-        if let index = accounts.firstIndex(where: { $0.id == profileID }), let home = accounts[index].homeURL {
-            let identityClient = CodexAppServerClient(codexHome: home)
-            if let account = try? await identityClient.readAccount() {
-                accounts[index].email = account.email
-                persistAccounts()
-            }
-            await identityClient.stop()
-        }
-        switchMeterAccount(to: profileID)
-        celebration = Celebration(title: "Account ready", subtitle: "Secure sign-in completed", symbol: "person.crop.circle.badge.checkmark")
-        dismissCelebration()
     }
 
     private func persistAccounts() {
         UserDefaults.standard.set(try? JSONEncoder().encode(accounts), forKey: Self.accountsKey)
     }
 
-    private func detectActivityMilestones(previous: LocalActivitySnapshot?, current: LocalActivitySnapshot?) {
-        guard !previewMode, previous != nil, let current else { return }
-        let newSavings = current.models.reduce(0) { total, item in savingsUSD(for: item) + total }
+    private func detectTokenMilestone(current: LocalActivitySnapshot?) {
+        guard !previewMode, let current else { return }
         let newTokens = current.total.totalTokens
-        let savingsStep = max(0, Int(newSavings / 50))
-        let savedStep = UserDefaults.standard.integer(forKey: Self.savingsMilestoneKey)
-        if savingsStep > savedStep, savingsStep > 0 {
-            UserDefaults.standard.set(savingsStep, forKey: Self.savingsMilestoneKey)
-            celebration = Celebration(title: "\(currency.code) \(Int(currency.convertFromUSD(newSavings))) saved", subtitle: "Estimated savings versus GPT-5.6 Sol", symbol: "sparkles")
-            dismissCelebration()
-            return
-        }
         let tokenStep = max(0, Int(newTokens / 1_000_000))
         let oldTokenStep = UserDefaults.standard.integer(forKey: Self.tokenMilestoneKey)
         if tokenStep >= 1, tokenStep > oldTokenStep, (tokenStep % 10 == 0 || oldTokenStep == 0) {
@@ -452,11 +480,6 @@ final class UsageStore: ObservableObject {
             celebration = Celebration(title: "Token milestone", subtitle: "You have used \(tokenStep)M local tokens", symbol: "bolt.fill")
             dismissCelebration()
         }
-    }
-
-    private func savingsUSD(for item: ModelTokenUsage) -> Double {
-        guard let baseline = OpenAIPriceCatalog.price(for: "gpt-5.6-sol"), let actual = OpenAIPriceCatalog.price(for: item.model) else { return 0 }
-        return max(0, baseline.estimate(item.usage) - actual.estimate(item.usage))
     }
 
     private func detectBankedResetMilestone(previous: RateLimitPayload?, current: RateLimitPayload) {
@@ -469,74 +492,6 @@ final class UsageStore: ObservableObject {
         UserDefaults.standard.set(key, forKey: Self.resetMilestoneKey)
         celebration = Celebration(title: "Reset banked", subtitle: "\(currentCount) available for this account", symbol: "arrow.counterclockwise.circle.fill")
         dismissCelebration()
-    }
-
-    private func switchCodexDesktopAccount(to profile: AccountProfile) async {
-        guard !isSwitchingCodexAccount else { return }
-        isSwitchingCodexAccount = true
-        accountSwitchStatus = "Signing Codex out…"
-        errorMessage = nil
-
-        let desktopClient = CodexAppServerClient()
-        do {
-            var expectedEmail = profile.email
-            if expectedEmail == nil, let home = profile.homeURL {
-                accountSwitchStatus = "Checking \(profile.name)…"
-                let profileClient = CodexAppServerClient(codexHome: home)
-                if let account = try? await profileClient.readAccount() {
-                    expectedEmail = account.email
-                    if let index = accounts.firstIndex(where: { $0.id == profile.id }) {
-                        accounts[index].email = account.email
-                        persistAccounts()
-                    }
-                }
-                await profileClient.stop()
-            }
-            accountSwitchStatus = "Signing Codex out…"
-            try await closeCodexDesktop()
-            try await desktopClient.logoutAccount()
-            accountSwitchStatus = "Waiting for secure OpenAI sign-in…"
-            let login = try await desktopClient.startChatGPTLogin()
-            guard NSWorkspace.shared.open(login.authorizationURL) else {
-                throw CodexClientError.server("The OpenAI sign-in page could not be opened in your browser.")
-            }
-            try await desktopClient.waitForLogin(id: login.id)
-            guard let signedIn = try await desktopClient.readAccount(refreshToken: true) else {
-                throw CodexClientError.server("Codex did not report a signed-in account after login.")
-            }
-            if let expected = expectedEmail, let actual = signedIn.email,
-               expected.caseInsensitiveCompare(actual) != .orderedSame {
-                throw CodexClientError.server("Codex signed in as \(actual), not \(expected). Sign in again and choose the intended account.")
-            }
-            await desktopClient.stop()
-            accountSwitchStatus = nil
-            isSwitchingCodexAccount = false
-            openCodex()
-            celebration = Celebration(
-                title: "Codex account switched",
-                subtitle: signedIn.email ?? profile.displayName,
-                symbol: "person.crop.circle.badge.checkmark"
-            )
-            dismissCelebration()
-        } catch {
-            await desktopClient.stop()
-            accountSwitchStatus = nil
-            isSwitchingCodexAccount = false
-            errorMessage = "Codex account switch failed: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
-            openCodex()
-        }
-    }
-
-    private func closeCodexDesktop() async throws {
-        let running = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
-        running.forEach { _ = $0.terminate() }
-        let deadline = ContinuousClock.now + .seconds(8)
-        while NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex").contains(where: { !$0.isTerminated }) {
-            guard ContinuousClock.now < deadline else {
-                throw CodexClientError.server("Codex could not be closed before signing out. Quit Codex and try again.")
-            }
-            try await Task.sleep(for: .milliseconds(150))
-        }
     }
 
     private func dismissCelebration() {
@@ -574,6 +529,12 @@ final class UsageStore: ObservableObject {
         UserDefaults.standard.set(max(0, cachedInputRate), forKey: Self.cachedInputRateKey)
         UserDefaults.standard.set(max(0, outputRate), forKey: Self.outputRateKey)
     }
+}
+
+private func decodedDefaultID(from data: Data?) -> UUID? {
+    guard let data,
+          let decoded = try? JSONDecoder().decode([AccountProfile].self, from: data) else { return nil }
+    return decoded.first(where: { $0.homePath == nil })?.id
 }
 
 enum ResetTimeFormatter {

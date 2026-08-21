@@ -41,7 +41,7 @@ The complete Swift source, local-log parser, build scripts and release automatio
 
 ### A true one-job Mac app
 
-No Electron runtime, background helper daemon, analytics SDK or external database. The native app sleeps between quota checks and scans local activity at most every ten minutes.
+No Electron runtime, background helper daemon, analytics SDK or external database. The native app sleeps between quota checks and scans local activity only when its panel or menu-bar activity mode needs it.
 
 ### Power without a privacy trade-off
 
@@ -50,6 +50,7 @@ Alert thresholds, menu-bar modes, history charts, cost rates and CLI automation 
 ## Features
 
 - Shows the most constrained Codex allowance directly in the macOS menu bar.
+- Shows weekly pace against an even seven-day allowance, with a compact reset, percentage and pace badge.
 - Breaks down every available usage window with a percentage and local reset time.
 - Refreshes automatically every two minutes, with manual refresh when you want it.
 - Warns you when remaining usage drops below 10%, 20%, or 30%.
@@ -62,8 +63,8 @@ Alert thresholds, menu-bar modes, history charts, cost rates and CLI automation 
 - Asks whether each profile change should affect Meter only or Meter plus the Codex desktop app.
 - For a desktop swap, signs Codex out through the official app-server method, completes OpenAI's browser login, verifies the account and relaunches Codex.
 - Deletes unused local account profiles and their saved Codex credentials with confirmation, including stale records whose folder is already gone.
-- Shows OpenAI's real banked-reset count when the account returns it, and celebrates reset, savings and token milestones.
-- Switches between icon + percentage, percentage-only, icon-only and activity-chart menu-bar modes.
+- Shows OpenAI's real banked-reset count when the account returns it, and celebrates reset and token milestones.
+- Switches between icon + percentage, reset + percentage, percentage-only, icon-only and activity-chart menu-bar modes.
 - Includes a universal `codex-meter` CLI with stable text/JSON output and threshold exit codes.
 - Supports launch at login without adding a Dock icon.
 - Keeps usage windows, activity, accounts and settings collapsible so the popover stays calm.

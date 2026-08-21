@@ -102,7 +102,13 @@ struct CodexMeterCLI {
             throw CLIError.argument("--exchange-rate requires --currency.")
         }
 
-        let snapshot = try await LocalActivityScanner().scan(days: days)
+        let scanner: LocalActivityScanner
+        if let testRoot = ProcessInfo.processInfo.environment["CODEX_METER_ACTIVITY_ROOT"], !testRoot.isEmpty {
+            scanner = LocalActivityScanner(roots: [URL(fileURLWithPath: testRoot, isDirectory: true)])
+        } else {
+            scanner = LocalActivityScanner()
+        }
+        let snapshot = try await scanner.scan(days: days)
         let rates = LocalCostRates(inputPerMillion: inputRate, cachedInputPerMillion: cachedRate, outputPerMillion: outputRate)
         let estimates = snapshot.models.map { item -> ModelEstimate in
             if let price = OpenAIPriceCatalog.price(for: item.model) {

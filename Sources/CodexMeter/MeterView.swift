@@ -14,9 +14,12 @@ struct MeterView: View {
             VStack(spacing: 0) {
                 header
                 Divider()
-                content
-                Divider()
-                settings
+                ViewThatFits(in: .vertical) {
+                    panelSections
+                    ScrollView { panelSections }
+                        .frame(height: 700)
+                }
+                .frame(maxHeight: 700, alignment: .top)
             }
             if let celebration = store.celebration {
                 CelebrationBanner(celebration: celebration)
@@ -33,6 +36,18 @@ struct MeterView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.white.opacity(colorScheme == .dark ? 0.12 : 0.42), lineWidth: 0.75)
+        }
+        .onAppear { store.setLocalActivityExpanded(localActivityExpanded) }
+        .onChange(of: localActivityExpanded) { expanded in
+            store.setLocalActivityExpanded(expanded)
+        }
+    }
+
+    private var panelSections: some View {
+        VStack(spacing: 0) {
+            content
+            Divider()
+            settings
         }
     }
 
@@ -60,7 +75,7 @@ struct MeterView: View {
             Button {
                 Task {
                     await store.refresh()
-                    await store.refreshActivity()
+                    await store.refreshActivity(force: true)
                 }
             } label: {
                 if store.isRefreshing {
@@ -123,9 +138,9 @@ struct MeterView: View {
             .frame(maxWidth: 112)
         }
         .menuStyle(.borderlessButton)
+        .focusable(false)
         .fixedSize()
-        .disabled(store.isSwitchingCodexAccount)
-        .help("Switch Codex account")
+        .help("Switch Codex Meter usage account")
         .accessibilityLabel("Current account: \(store.activeAccountDisplayName). Open account switcher")
     }
 
@@ -151,6 +166,26 @@ struct MeterView: View {
                         .padding(.horizontal, -16)
                 } label: {
                     SectionLabel(title: "Local activity", detail: "\(compactTokens(activity.total.totalTokens)) tokens")
+                }
+                .padding(16)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.3), lineWidth: 0.6)
+                }
+            } else if store.isActivityRefreshing {
+                Divider()
+                DisclosureGroup(isExpanded: $localActivityExpanded) {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Scanning local logs…")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.top, 10)
+                } label: {
+                    SectionLabel(title: "Local activity", detail: "Updating")
                 }
                 .padding(16)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -189,9 +224,9 @@ struct MeterView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 148)
         } else if store.windows.isEmpty {
-            EmptyState(message: store.errorMessage ?? "Usage data is unavailable.") {
+            EmptyState(message: store.errorMessage ?? "Usage data is unavailable.", retry: {
                 Task { await store.refresh() }
-            }
+            }, copyDiagnostics: store.copyUsageDiagnostics)
         } else {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
@@ -211,16 +246,22 @@ struct MeterView: View {
                     : "Reset credits currently available for this account")
                 Divider().padding(.leading, 16)
                 ForEach(Array(store.windows.enumerated()), id: \.offset) { index, window in
-                    UsageRow(window: window)
+                    UsageRow(window: window, now: store.payload?.fetchedAt ?? Date())
                     if index < store.windows.count - 1 { Divider().padding(.leading, 16) }
                 }
                 if let error = store.errorMessage {
-                    Text(error)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.orange)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 12)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(error)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Copy Diagnostics", action: store.copyUsageDiagnostics)
+                            .font(.system(size: 9, weight: .medium))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
                 }
             }
         }
@@ -260,25 +301,16 @@ struct MeterView: View {
                     .foregroundStyle(store.canDeleteActiveAccount ? Color.red : Color.secondary)
                     .disabled(!store.canDeleteActiveAccount)
             }
-            if let status = store.accountSwitchStatus {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(status)
-                        .font(.system(size: 10, weight: .medium))
-                    Spacer()
-                }
+            if let accountError = store.accountErrorMessage {
+                Text(accountError)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Profiles change only the usage account shown in Codex Meter.")
+                .font(.system(size: 9))
                 .foregroundStyle(.secondary)
-            }
-            HStack(spacing: 8) {
-                Text("Desktop switching uses OpenAI's secure sign-in.")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Open Codex…") { store.openCodex() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-            }
+                .frame(maxWidth: .infinity, alignment: .leading)
             HStack {
                 Text("Menu bar")
                     .font(.system(size: 12))
@@ -407,6 +439,8 @@ private struct LocalActivityView: View {
     let rates: LocalCostRates
     let currency: DisplayCurrency
     let totalSavings: Double
+    @AppStorage("localActivityModelsExpanded") private var modelsExpanded = false
+    @AppStorage("localActivityEstimatesExpanded") private var estimatesExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -429,6 +463,15 @@ private struct LocalActivityView: View {
                 }
             }
 
+            if activity.summarizedLargeFiles > 0 {
+                Label(
+                    "\(activity.summarizedLargeFiles) oversized \(activity.summarizedLargeFiles == 1 ? "log" : "logs") summarized for performance",
+                    systemImage: "bolt.fill"
+                )
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            }
+
             Chart(activity.days) { day in
                 BarMark(
                     x: .value("Day", day.date, unit: .day),
@@ -447,22 +490,36 @@ private struct LocalActivityView: View {
             .accessibilityLabel("Seven-day local token activity")
             .accessibilityValue(accessibilitySummary)
 
-            if !activity.models.isEmpty {
+            if !visibleModels.isEmpty {
                 VStack(spacing: 6) {
-                    ForEach(activity.models) { item in
+                    ForEach(visibleModels) { item in
                         HStack(spacing: 8) {
                             Text(item.model)
                                 .font(.system(size: 10, weight: .medium))
                                 .lineLimit(1)
-                            Spacer()
+                                .truncationMode(.middle)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             Text(modelShare(item))
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .frame(width: 82, alignment: .trailing)
                             Text(modelCost(item))
                                 .monospacedDigit()
-                                .frame(width: 54, alignment: .trailing)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                                .frame(width: 88, alignment: .trailing)
                         }
                         .font(.system(size: 10))
                         .accessibilityElement(children: .combine)
+                    }
+                    if activity.models.count > 4 {
+                        Button(modelsExpanded ? "Show top models" : "Show all \(activity.models.count) models") {
+                            modelsExpanded.toggle()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
@@ -470,20 +527,34 @@ private struct LocalActivityView: View {
             HStack {
                 Text("Today \(compactTokens(activity.today.totalTokens))")
                 Spacer()
-                Text("API-equivalent ≈ \(formatted(automaticEstimate))")
+                Text("Updated \(activity.sampledAt.formatted(date: .omitted, time: .shortened))")
             }
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
-            Text("API prices checked 15 Jul 2026 · estimate only")
-                .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
-            if totalSavings > 0 {
-                Text("Estimated savings vs GPT-5.6 Sol: \(formatted(totalSavings))")
+
+            DisclosureGroup(isExpanded: $estimatesExpanded) {
+                VStack(alignment: .leading, spacing: 5) {
+                    LabeledContent("API-equivalent estimate", value: formatted(automaticEstimate))
+                    if totalSavings > 0 {
+                        LabeledContent("Hypothetical difference vs GPT-5.6 Sol", value: formatted(totalSavings))
+                    }
+                    Text("Standard API prices checked 15 Jul 2026. These are comparisons, not subscription charges or realized savings.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.system(size: 10))
+                .padding(.top, 6)
+            } label: {
+                Text("Estimates")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
             }
         }
         .padding(16)
+    }
+
+    private var visibleModels: ArraySlice<ModelTokenUsage> {
+        activity.models.prefix(modelsExpanded ? activity.models.count : 4)
     }
 
     private var automaticEstimate: Double {
@@ -544,9 +615,10 @@ private struct CostRateField: View {
 
 private struct UsageRow: View {
     let window: RateLimitWindow
+    let now: Date
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
@@ -561,21 +633,38 @@ private struct UsageRow: View {
                     Text(ResetTimeFormatter.relativeText(for: window.resetsAt))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                        .help(ResetTimeFormatter.absoluteText(for: window.resetsAt) ?? "")
                 }
                 Spacer()
-                Text("\(window.remainingPercent)%")
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .accessibilityLabel("\(window.remainingPercent) percent remaining")
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("\(window.remainingPercent)%")
+                        .font(.system(size: 22, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                    Text("remaining")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    if let absoluteReset = ResetTimeFormatter.absoluteText(for: window.resetsAt) {
+                        Text(absoluteReset)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(window.remainingPercent) percent remaining")
             }
 
-            ProgressView(value: Double(window.remainingPercent), total: 100)
-                .progressViewStyle(.linear)
-                .tint(meterColor)
+            UsageProgressBar(remainingPercent: window.remainingPercent, color: meterColor)
                 .animation(.easeInOut(duration: 0.45), value: window.remainingPercent)
                 .accessibilityLabel(window.displayName)
-                .accessibilityValue("\(window.remainingPercent) percent remaining. \(ResetTimeFormatter.relativeText(for: window.resetsAt))")
+                .accessibilityValue([
+                    "\(window.remainingPercent) percent remaining.",
+                    ResetTimeFormatter.relativeText(for: window.resetsAt),
+                    ResetTimeFormatter.absoluteText(for: window.resetsAt)
+                ].compactMap { $0 }.joined(separator: " "))
+
+            if let pace = WeeklyPace(window: window, now: now) {
+                Divider()
+                WeeklyPaceView(pace: pace)
+            }
         }
         .padding(16)
     }
@@ -593,9 +682,122 @@ private struct UsageRow: View {
     }
 }
 
+private struct UsageProgressBar: View {
+    let remainingPercent: Int
+    let color: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.18)).frame(height: 8)
+                Capsule()
+                    .fill(color)
+                    .frame(width: width * CGFloat(remainingPercent) / 100, height: 8)
+                ForEach(0...8, id: \.self) { index in
+                    Rectangle()
+                        .fill(Color.primary.opacity(index.isMultiple(of: 2) ? 0.24 : 0.12))
+                        .frame(width: 1, height: index.isMultiple(of: 2) ? 14 : 10)
+                        .position(x: min(max(width * CGFloat(index) / 8, 0.5), width - 0.5), y: 7)
+                }
+            }
+            .frame(height: 14)
+        }
+        .frame(height: 14)
+    }
+}
+
+private struct WeeklyPaceView: View {
+    let pace: WeeklyPace
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Weekly pace")
+                    .font(.system(size: 11, weight: .semibold))
+                Spacer()
+                Text(pace.summaryText)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(PacePalette.color(for: pace.deltaPoints))
+            }
+            Text("\(rounded(pace.actualUsedPercent))% used · \(rounded(pace.expectedUsedPercent))% expected by now")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            PaceBar(pace: pace)
+            HStack {
+                Text("−50%")
+                Spacer()
+                Text("On pace")
+                Spacer()
+                Text("+50%")
+            }
+            .font(.system(size: 8))
+            .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Weekly pace")
+        .accessibilityValue("\(pace.summaryText). \(rounded(pace.actualUsedPercent)) percent used; \(rounded(pace.expectedUsedPercent)) percent expected by now.")
+    }
+
+    private func rounded(_ value: Double) -> Int { Int(value.rounded()) }
+}
+
+private struct PaceBar: View {
+    let pace: WeeklyPace
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let center = width / 2
+            let marker = width * CGFloat((pace.markerPosition + 1) / 2)
+            let color = PacePalette.color(for: pace.deltaPoints)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.22)).frame(height: 8)
+                Capsule()
+                    .fill(color)
+                    .frame(width: abs(marker - center), height: 8)
+                    .position(x: (marker + center) / 2, y: 9)
+                Rectangle()
+                    .fill(Color.primary.opacity(0.35))
+                    .frame(width: 1, height: 13)
+                    .position(x: center, y: 5.5)
+                Circle()
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .overlay(Circle().stroke(color, lineWidth: 3))
+                    .frame(width: 13, height: 13)
+                    .position(x: marker, y: 9)
+            }
+            .frame(height: 18)
+        }
+        .frame(height: 18)
+    }
+}
+
+private enum PacePalette {
+    static func color(for delta: Double) -> Color {
+        guard delta > 0 else { return Color(nsColor: .systemGreen) }
+        let stops: [(Double, NSColor)] = [
+            (0, .systemGreen),
+            (12.5, .systemYellow),
+            (25, .systemOrange),
+            (37.5, .systemRed),
+            (50, NSColor(calibratedRed: 0.55, green: 0.02, blue: 0.04, alpha: 1))
+        ]
+        let clamped = min(delta, 50)
+        for index in 1..<stops.count where clamped <= stops[index].0 {
+            let lower = stops[index - 1]
+            let upper = stops[index]
+            let fraction = (clamped - lower.0) / (upper.0 - lower.0)
+            return Color(nsColor: lower.1.blended(withFraction: fraction, of: upper.1) ?? upper.1)
+        }
+        return Color(nsColor: stops.last!.1)
+    }
+}
+
 private struct EmptyState: View {
     let message: String
     let retry: () -> Void
+    let copyDiagnostics: () -> Void
 
     var body: some View {
         VStack(spacing: 10) {
@@ -609,8 +811,11 @@ private struct EmptyState: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 260)
-            Button("Try again", action: retry)
-                .controlSize(.small)
+            HStack(spacing: 10) {
+                Button("Try again", action: retry)
+                Button("Copy Diagnostics", action: copyDiagnostics)
+            }
+            .controlSize(.small)
         }
         .frame(maxWidth: .infinity, minHeight: 166)
         .padding(.horizontal, 20)
