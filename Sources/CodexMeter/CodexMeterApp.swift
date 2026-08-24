@@ -167,7 +167,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 " Resets \($0.formatted(date: .abbreviated, time: .shortened))."
             } ?? ""
             let paceText = WeeklyPace(window: window).map { " Weekly pace: \($0.summaryText)." } ?? ""
-            button.toolTip = "\(window.displayName): \(remaining)% remaining. \(countdown.accessibilityText).\(exactReset)\(paceText)"
+            let freshness: String
+            if let error = store.errorMessage {
+                freshness = " Last refresh failed: \(error) Showing the last successful reading."
+            } else if store.isStale, let updated = store.payload?.fetchedAt {
+                freshness = " Reading is stale; last updated \(updated.formatted(date: .omitted, time: .shortened))."
+            } else {
+                freshness = ""
+            }
+            button.toolTip = "\(window.displayName): \(remaining)% remaining. \(countdown.accessibilityText).\(exactReset)\(paceText)\(freshness)"
         } else {
             button.image = NSImage(systemSymbolName: "exclamationmark.circle", accessibilityDescription: "Codex usage unavailable")
             button.title = "—"

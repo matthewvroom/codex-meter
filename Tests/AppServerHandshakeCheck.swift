@@ -29,6 +29,18 @@ struct AppServerHandshakeCheck {
         precondition(payload.snapshot.limitID == "codex")
         precondition(payload.snapshot.secondary?.remainingPercent == 56)
         await client.stop()
+
+        let retryMarker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-meter-retry-\(UUID().uuidString)")
+        setenv("CODEX_METER_TEST_FAIL_FIRST_PATH", retryMarker.path, 1)
+        let retryingClient = CodexAppServerClient(
+            executableURL: URL(fileURLWithPath: CommandLine.arguments[0])
+        )
+        let retriedPayload = try await retryingClient.readRateLimits()
+        precondition(retriedPayload.snapshot.secondary?.remainingPercent == 56)
+        await retryingClient.stop()
+        unsetenv("CODEX_METER_TEST_FAIL_FIRST_PATH")
+        try? FileManager.default.removeItem(at: retryMarker)
         print("Deterministic app-server initialization handshake passed")
     }
 
@@ -44,6 +56,11 @@ struct AppServerHandshakeCheck {
                 write(["id": id, "result": [:]])
                 step = 1
             case (1, "initialized"):
+                if let marker = ProcessInfo.processInfo.environment["CODEX_METER_TEST_FAIL_FIRST_PATH"],
+                   !FileManager.default.fileExists(atPath: marker) {
+                    FileManager.default.createFile(atPath: marker, contents: Data())
+                    return
+                }
                 step = 2
             case (2, "account/rateLimits/read"):
                 guard let id = message["id"] else { exit(22) }

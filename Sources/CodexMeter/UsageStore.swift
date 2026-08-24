@@ -228,7 +228,6 @@ final class UsageStore: ObservableObject {
         menuBarWindow?.remainingPercent
     }
     var menuBarWindow: RateLimitWindow? {
-        guard errorMessage == nil, !isStale else { return nil }
         return payload?.snapshot.mostConstrainedWindow
     }
     var planLabel: String? {

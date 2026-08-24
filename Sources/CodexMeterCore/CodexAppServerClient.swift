@@ -53,6 +53,17 @@ public actor CodexAppServerClient {
     }
 
     public func readRateLimits() async throws -> RateLimitPayload {
+        do {
+            return try await readRateLimitsOnce()
+        } catch let error as CodexClientError where error == .timedOut || error == .disconnected {
+            // Long-lived app-server processes can stop answering after Codex updates or wakes.
+            // Restart once so a transient helper failure does not blank the menu-bar reading.
+            stop()
+            return try await readRateLimitsOnce()
+        }
+    }
+
+    private func readRateLimitsOnce() async throws -> RateLimitPayload {
         if process?.isRunning != true { try start() }
         try await ensureInitialized()
 

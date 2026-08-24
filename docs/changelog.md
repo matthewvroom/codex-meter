@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.6
+
+- Restart and retry the Codex usage helper once after a timeout or unexpected disconnect.
+- Keep the last successful menu-bar badge visible while usage is stale or a refresh is recovering.
+- Explain stale and failed refreshes in the badge tooltip instead of replacing the reading with an empty indicator.
+
 ## 1.6.5
 
 - Corrected oversized-log accounting so inherited cumulative counters are used as baselines instead of new activity.
