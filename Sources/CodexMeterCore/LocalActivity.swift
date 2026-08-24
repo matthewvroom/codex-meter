@@ -396,7 +396,7 @@ public actor LocalActivityScanner {
                 data = Data(data[data.index(after: newline)...])
             }
             let sessionID = url.deletingPathExtension().lastPathComponent
-            if sessionStartDate(for: url).map({ $0 < cutoff }) ?? true {
+            if offset > 0 || sessionStartDate(for: url).map({ $0 < cutoff }) ?? true {
                 partialSessions.insert(sessionID)
             }
             let filtered = data.split(separator: 0x0A, omittingEmptySubsequences: true).filter { line in

@@ -17,6 +17,8 @@ Rollout logs can contain private prompts, responses, tool calls and file paths. 
 
 Codex Meter has no analytics, telemetry, advertising, account service or history upload. The quota request is handled by the installed Codex process using its existing session. Local history, model pricing and USD/AUD/EUR conversion do not make network calls.
 
+When automatic update checks are enabled, the app makes up to two unauthenticated HTTPS requests per day to GitHub's public Releases API: one for the original project and one for Matthew's fork. These requests contain no Codex credentials, account information, prompts, responses, token history or usage totals. Automatic checks can be disabled in Settings. Codex Meter never downloads or installs an update without the user opening its GitHub release page.
+
 Adding an account starts the supported `codex login` browser flow with a profile-specific `CODEX_HOME`. Email, password, SSO and MFA are entered only on OpenAI's secure page; the browser returns the completed session directly to Codex. Codex Meter then starts the read-only app-server under that profile. The app does not copy, parse or display `auth.json`, access tokens, passwords or verification codes.
 
 Deleting a non-default profile requires confirmation and removes its entire local `CODEX_HOME`, including the Codex-owned cached credentials. It does not delete or modify the OpenAI account. If the folder is already absent, Codex Meter still removes the stale profile entry.

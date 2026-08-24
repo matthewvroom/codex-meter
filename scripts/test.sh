@@ -30,6 +30,12 @@ swiftc \
 "$TMP/activity-check"
 
 swiftc \
+  "$ROOT/Sources/CodexMeterCore/UpdateChecker.swift" \
+  "$ROOT/Tests/UpdateCheckerCheck.swift" \
+  -o "$TMP/update-checker-check"
+"$TMP/update-checker-check"
+
+swiftc \
   "$ROOT/Sources/CodexMeterCore/ActivityRefreshDemand.swift" \
   "$ROOT/Tests/ActivityRefreshDemandCheck.swift" \
   -o "$TMP/activity-refresh-demand-check"

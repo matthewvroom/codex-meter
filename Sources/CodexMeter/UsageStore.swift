@@ -68,6 +68,17 @@ final class UsageStore: ObservableObject {
     @Published var currency: DisplayCurrency {
         didSet { UserDefaults.standard.set(currency.rawValue, forKey: Self.currencyKey) }
     }
+    @Published var selectedUpdateChannel: UpdateChannel {
+        didSet { UserDefaults.standard.set(selectedUpdateChannel.rawValue, forKey: Self.updateChannelKey) }
+    }
+    @Published var automaticallyChecksForUpdates: Bool {
+        didSet {
+            UserDefaults.standard.set(automaticallyChecksForUpdates, forKey: Self.automaticUpdateChecksKey)
+            restartUpdateChecks()
+        }
+    }
+    @Published private(set) var updateResults: [UpdateChannel: UpdateChannelResult] = [:]
+    @Published private(set) var isCheckingForUpdates = false
     @Published private(set) var accounts: [AccountProfile]
     @Published var activeAccountID: UUID {
         didSet { UserDefaults.standard.set(activeAccountID.uuidString, forKey: Self.activeAccountKey) }
@@ -75,9 +86,11 @@ final class UsageStore: ObservableObject {
     @Published private(set) var celebration: Celebration?
     private var client: CodexAppServerClient
     private let activityScanner = LocalActivityScanner()
+    private let updateChecker = UpdateChecker()
     private let previewMode: Bool
     private var pollingTask: Task<Void, Never>?
     private var activityPollingTask: Task<Void, Never>?
+    private var updatePollingTask: Task<Void, Never>?
     private var popoverVisible = false
     private var localActivityExpanded = true
     private var currentActivityDemand = ActivityRefreshDemand(
@@ -98,6 +111,10 @@ final class UsageStore: ObservableObject {
     private static let currencyKey = "displayCurrency"
     private static let accountsKey = "accountProfiles"
     private static let activeAccountKey = "activeAccountID"
+    private static let updateChannelKey = "updateChannel"
+    private static let automaticUpdateChecksKey = "automaticUpdateChecks"
+    private static let lastUpdateCheckKey = "lastUpdateCheck"
+    private static let lastNotifiedUpdateKey = "lastNotifiedUpdate"
     private static let tokenMilestoneKey = "lastTokenMilestone"
     private static let resetMilestoneKey = "lastBankedReset"
 
@@ -133,6 +150,8 @@ final class UsageStore: ObservableObject {
         cachedInputRate = UserDefaults.standard.double(forKey: Self.cachedInputRateKey)
         outputRate = UserDefaults.standard.double(forKey: Self.outputRateKey)
         currency = DisplayCurrency(rawValue: UserDefaults.standard.string(forKey: Self.currencyKey) ?? "") ?? .usd
+        selectedUpdateChannel = UpdateChannel(rawValue: UserDefaults.standard.string(forKey: Self.updateChannelKey) ?? "") ?? .matthewFork
+        automaticallyChecksForUpdates = UserDefaults.standard.object(forKey: Self.automaticUpdateChecksKey) as? Bool ?? true
         if let data = UserDefaults.standard.data(forKey: Self.lowUsageAlertStateKey),
            let decoded = try? JSONDecoder().decode(LowUsageAlertState.self, from: data) {
             lowUsageAlertState = decoded
@@ -168,6 +187,23 @@ final class UsageStore: ObservableObject {
             if ProcessInfo.processInfo.arguments.contains("--preview-alert") {
                 celebration = Celebration(title: "Usage running low", subtitle: "16% remains in weekly limit", symbol: "exclamationmark.triangle.fill")
             }
+            let previewRelease = GitHubRelease(
+                version: "1.6.5",
+                tagName: "v1.6.5",
+                name: "Codex Meter 1.6.5",
+                releaseURL: UpdateChannel.matthewFork.repositoryURL,
+                publishedAt: now
+            )
+            updateResults = [
+                .matthewFork: UpdateChannelResult(channel: .matthewFork, release: previewRelease, errorMessage: nil, checkedAt: now),
+                .original: UpdateChannelResult(channel: .original, release: GitHubRelease(
+                    version: "1.5.0",
+                    tagName: "v1.5.0",
+                    name: "Codex Meter 1.5.0",
+                    releaseURL: UpdateChannel.original.repositoryURL,
+                    publishedAt: now
+                ), errorMessage: nil, checkedAt: now)
+            ]
         }
         if #available(macOS 13.0, *) {
             launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -205,6 +241,17 @@ final class UsageStore: ObservableObject {
         guard let fetchedAt = payload?.fetchedAt else { return false }
         return Date().timeIntervalSince(fetchedAt) > 180
     }
+    var currentAppVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+    }
+    var selectedUpdateAvailable: Bool {
+        updateResults[selectedUpdateChannel]?.release?.isNewer(than: currentAppVersion) == true
+    }
+    var unselectedUpdateAvailable: Bool {
+        UpdateChannel.allCases.contains { channel in
+            channel != selectedUpdateChannel && updateResults[channel]?.release?.isNewer(than: currentAppVersion) == true
+        }
+    }
 
     func start() {
         guard !previewMode else { return }
@@ -218,6 +265,54 @@ final class UsageStore: ObservableObject {
             }
         }
         updateActivityDemand()
+        restartUpdateChecks()
+    }
+
+    func updateResult(for channel: UpdateChannel) -> UpdateChannelResult? {
+        updateResults[channel]
+    }
+
+    func checkForUpdates(notify: Bool = false) async {
+        guard !isCheckingForUpdates else { return }
+        isCheckingForUpdates = true
+        defer { isCheckingForUpdates = false }
+        let results = await updateChecker.checkAll()
+        updateResults = Dictionary(uniqueKeysWithValues: results.map { ($0.channel, $0) })
+        UserDefaults.standard.set(Date(), forKey: Self.lastUpdateCheckKey)
+        guard notify,
+              let release = updateResults[selectedUpdateChannel]?.release,
+              release.isNewer(than: currentAppVersion) else { return }
+        let notificationKey = "\(selectedUpdateChannel.rawValue):\(release.version)"
+        guard UserDefaults.standard.string(forKey: Self.lastNotifiedUpdateKey) != notificationKey else { return }
+        UserDefaults.standard.set(notificationKey, forKey: Self.lastNotifiedUpdateKey)
+        showCelebration(Celebration(
+            title: "Codex Meter \(release.version) available",
+            subtitle: "Open Settings to view the release",
+            symbol: "arrow.down.circle.fill"
+        ))
+    }
+
+    func openRelease(for channel: UpdateChannel) {
+        let url = updateResults[channel]?.release?.releaseURL ?? channel.repositoryURL
+        NSWorkspace.shared.open(url)
+    }
+
+    private func restartUpdateChecks() {
+        updatePollingTask?.cancel()
+        updatePollingTask = nil
+        guard !previewMode, automaticallyChecksForUpdates else { return }
+        updatePollingTask = Task { [weak self] in
+            guard let self else { return }
+            let lastCheck = UserDefaults.standard.object(forKey: Self.lastUpdateCheckKey) as? Date ?? .distantPast
+            if Date().timeIntervalSince(lastCheck) >= 86_400 {
+                await self.checkForUpdates(notify: true)
+            }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(86_400))
+                guard !Task.isCancelled else { break }
+                await self.checkForUpdates(notify: true)
+            }
+        }
     }
 
     func refreshActivity(force: Bool = false) async {

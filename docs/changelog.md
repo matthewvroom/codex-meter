@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.5
+
+- Corrected oversized-log accounting so inherited cumulative counters are used as baselines instead of new activity.
+- Clarified that local API-equivalent pricing is an estimate, not a ChatGPT or Codex bill.
+- Closed the menu-bar popover reliably when Codex Meter loses focus.
+- Added selectable update channels for the original project and Matthew's fork using GitHub's public Releases API.
+- Preserved an existing `/Applications/Utilities` installation location during source installs.
+
 ## 1.6.4 — 2026-08-24
 
 - Fit the popover to its visible content and cap it to the current screen before enabling one scrolling body.

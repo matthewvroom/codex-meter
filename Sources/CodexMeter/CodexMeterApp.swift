@@ -44,6 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(rootView: MeterView(store: store) { [weak self] size in
             self?.popover.contentSize = size
         })
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidResignActive),
+            name: NSApplication.didResignActiveNotification,
+            object: nil
+        )
 
         if windowedMode {
             let window = NSWindow(
@@ -103,6 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func popoverDidClose(_ notification: Notification) {
         store.setPopoverVisible(false)
+    }
+
+    @objc private func applicationDidResignActive() {
+        if popover.isShown { popover.performClose(nil) }
     }
 
     @objc private func refresh() {

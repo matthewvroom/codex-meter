@@ -67,6 +67,7 @@ Alert thresholds, menu-bar modes, history charts, cost rates and CLI automation 
 - Switches between Icon + Percentage, Reset + Percentage, Reset + Percentage + Pace, Percentage Only, Icon Only and Activity Chart menu-bar modes.
 - Includes a universal `codex-meter` CLI with stable text/JSON output and threshold exit codes.
 - Supports launch at login without adding a Dock icon.
+- Checks both the original project and Matthew's fork for public GitHub releases, with a user-selected update source and manual installation.
 - Keeps usage windows, activity, accounts and settings collapsible so the popover stays calm.
 - Works natively on Apple silicon and Intel Macs.
 
@@ -97,11 +98,11 @@ This app has one job and does not need your data for anything else.
 - No analytics
 - No ads
 - No tracking
-- No extra network service
+- No private update service; optional release checks use GitHub's public API
 - No copied or stored Codex credentials
 - No uploaded session history
 
-Codex Meter starts the local `codex app-server` process and calls its read-only `account/rateLimits/read` method. For history, it prefilters `turn_context` and `token_count` lines from local rollout logs, then a narrow decoder retains only model IDs, timestamps and cumulative numeric totals; prompts, responses and tool payload fields are ignored. It never reads `~/.codex/auth.json` and never calls the rate-limit reset action. See [Privacy](docs/privacy.md) and [Architecture](docs/architecture.md) for the full data flow.
+Codex Meter starts the local `codex app-server` process and calls its read-only `account/rateLimits/read` method. For history, it prefilters `turn_context` and `token_count` lines from local rollout logs, then a narrow decoder retains only model IDs, timestamps and cumulative numeric totals; prompts, responses and tool payload fields are ignored. Release checks send ordinary unauthenticated HTTPS requests to GitHub containing no Codex account or activity data. It never reads `~/.codex/auth.json` and never calls the rate-limit reset action. See [Privacy](docs/privacy.md) and [Architecture](docs/architecture.md) for the full data flow.
 
 ## CLI and scripting
 

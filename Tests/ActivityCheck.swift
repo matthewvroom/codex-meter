@@ -74,6 +74,24 @@ struct ActivityCheck {
         precondition(summarized.summarizedLargeFiles == 1)
         precondition(summarized.total.totalTokens == 220)
 
+        let truncatedRoot = largeRoot.appendingPathComponent("truncated", isDirectory: true)
+        try FileManager.default.createDirectory(at: truncatedRoot, withIntermediateDirectories: true)
+        let inherited = event(at: -2, input: 1_000_000_000, cached: 900_000_000, output: 2_000_000, total: 1_002_000_000)
+        let advanced = event(at: -1, input: 1_000_000_100, cached: 900_000_040, output: 2_000_020, total: 1_002_000_120)
+        let truncatedRecords = String(repeating: "discarded filler line\n", count: 500)
+            + context("gpt-5.6-terra") + "\n" + inherited + "\n" + advanced + "\n"
+        try Data(truncatedRecords.utf8).write(to: truncatedRoot.appendingPathComponent("rollout-truncated.jsonl"))
+        let truncated = try await LocalActivityScanner(
+            roots: [truncatedRoot],
+            largeFileThresholdBytes: 1,
+            largeFileTailBytes: 4_096
+        ).scan(days: 7)
+        precondition(truncated.summarizedLargeFiles == 1)
+        precondition(truncated.total.inputTokens == 100)
+        precondition(truncated.total.cachedInputTokens == 40)
+        precondition(truncated.total.outputTokens == 20)
+        precondition(truncated.total.totalTokens == 120)
+
         let unknownRoot = root.appendingPathComponent("unknown", isDirectory: true)
         try FileManager.default.createDirectory(at: unknownRoot, withIntermediateDirectories: true)
         try Data((event(at: 0, input: 10, cached: 0, output: 2, total: 12) + "\n").utf8)

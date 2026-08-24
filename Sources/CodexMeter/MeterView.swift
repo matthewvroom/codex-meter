@@ -398,6 +398,45 @@ struct MeterView: View {
                 set: { store.setLaunchAtLogin($0) }
             ))
             .font(.system(size: 12))
+            Divider()
+            HStack {
+                Text("Update source")
+                    .font(.system(size: 12))
+                Spacer()
+                Picker("Update source", selection: $store.selectedUpdateChannel) {
+                    ForEach(UpdateChannel.allCases) { channel in
+                        Text(channel.displayName).tag(channel)
+                    }
+                }
+                .labelsHidden()
+                .font(.system(size: 10))
+                .frame(width: 154)
+            }
+            Toggle("Automatically check daily", isOn: $store.automaticallyChecksForUpdates)
+                .font(.system(size: 12))
+            VStack(spacing: 7) {
+                ForEach(UpdateChannel.allCases) { channel in
+                    updateChannelRow(channel)
+                }
+            }
+            if store.selectedUpdateChannel == .original {
+                Text("The original project may not include features that are available only in Matthew's fork.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Text("Installed \(store.currentAppVersion)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(store.isCheckingForUpdates ? "Checking…" : "Check Now") {
+                    Task { await store.checkForUpdates() }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .disabled(store.isCheckingForUpdates)
+            }
             HStack {
                 Button("Open Codex") { store.openCodex() }
                     .buttonStyle(.plain)
@@ -410,6 +449,50 @@ struct MeterView: View {
             .font(.system(size: 12))
         }
         .padding(16)
+    }
+
+    private func updateChannelRow(_ channel: UpdateChannel) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: store.selectedUpdateChannel == channel ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(store.selectedUpdateChannel == channel ? Color.accentColor : Color.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(channel.displayName)
+                    .font(.system(size: 10, weight: .medium))
+                Text("\(channel.owner)/\(channel.repository)")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let result = store.updateResult(for: channel), let release = result.release {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("v\(release.version)")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                    if release.isNewer(than: store.currentAppVersion) {
+                        Text(channel == store.selectedUpdateChannel ? "Update available" : "Newer release")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(channel == store.selectedUpdateChannel ? Color.accentColor : Color.orange)
+                    }
+                }
+                Button { store.openRelease(for: channel) } label: {
+                    Image(systemName: "arrow.up.right.square")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .help("View \(channel.displayName) release")
+            } else if let result = store.updateResult(for: channel), result.errorMessage != nil {
+                Button("Unavailable") { store.openRelease(for: channel) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .help(result.errorMessage ?? "Release information is unavailable")
+            } else {
+                Text("Not checked")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var headerSubtitle: String {
@@ -593,7 +676,7 @@ private struct ThisMacActivityView: View {
 
             DisclosureGroup(isExpanded: $estimatesExpanded) {
                 VStack(alignment: .leading, spacing: 5) {
-                    LabeledContent("Priced-model API equivalent", value: formatted(automaticEstimate))
+                    LabeledContent("Equivalent standard API cost", value: formatted(automaticEstimate))
                     if totalSavings > 0 {
                         LabeledContent("Hypothetical difference vs GPT-5.6 Sol", value: formatted(totalSavings))
                     }
@@ -602,9 +685,9 @@ private struct ThisMacActivityView: View {
                         LabeledContent(item.model, value: modelCost(item))
                             .lineLimit(1)
                     }
-                    Text("Recognized prices cover \(pricedCoveragePercent)% of recorded tokens in this view.")
+                    Text("Recognized prices cover \(pricedCoveragePercent) of recorded tokens in this view.")
                         .foregroundStyle(.secondary)
-                    Text("Standard API prices checked \(OpenAIPriceCatalog.effectiveDate). This estimates standard API pricing only for recognized models in logs on this Mac. It is not your ChatGPT or Codex subscription bill; unpriced models and other machines are excluded.")
+                    Text("Estimate only — not your ChatGPT or Codex bill. Standard API prices checked \(OpenAIPriceCatalog.effectiveDate) are applied only to recognized models recorded in session logs on this Mac. Summarized logs may be incomplete; unpriced models and other machines are excluded.")
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -643,12 +726,12 @@ private struct ThisMacActivityView: View {
         return "\(Int((Double(item.usage.totalTokens) / Double(activity.total.totalTokens) * 100).rounded()))% · \(compactTokens(item.usage.totalTokens))"
     }
 
-    private var pricedCoveragePercent: Int {
-        guard activity.total.totalTokens > 0 else { return 0 }
+    private var pricedCoveragePercent: String {
+        guard activity.total.totalTokens > 0 else { return "0.0%" }
         let pricedTokens = activity.models.reduce(Int64(0)) { total, item in
             OpenAIPriceCatalog.price(for: item.model) == nil ? total : total + item.usage.totalTokens
         }
-        return Int((Double(pricedTokens) / Double(activity.total.totalTokens) * 100).rounded())
+        return String(format: "%.1f%%", Double(pricedTokens) / Double(activity.total.totalTokens) * 100)
     }
 
     private func formatted(_ amount: Double) -> String {
