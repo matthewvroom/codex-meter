@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.7
+
+- Prevent a retiring Codex helper's delayed disconnect callback from clearing the replacement helper's live connection.
+- Stabilize automatic recovery after transient app-server timeouts and Codex restarts.
+
 ## 1.6.6
 
 - Restart and retry the Codex usage helper once after a timeout or unexpected disconnect.

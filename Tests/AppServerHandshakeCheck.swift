@@ -34,7 +34,9 @@ struct AppServerHandshakeCheck {
             .appendingPathComponent("codex-meter-retry-\(UUID().uuidString)")
         setenv("CODEX_METER_TEST_FAIL_FIRST_PATH", retryMarker.path, 1)
         let retryingClient = CodexAppServerClient(
-            executableURL: URL(fileURLWithPath: CommandLine.arguments[0])
+            executableURL: URL(fileURLWithPath: CommandLine.arguments[0]),
+            responseTimeout: .seconds(1),
+            connectionEndDelay: .milliseconds(300)
         )
         let retriedPayload = try await retryingClient.readRateLimits()
         precondition(retriedPayload.snapshot.secondary?.remainingPercent == 56)
@@ -46,6 +48,12 @@ struct AppServerHandshakeCheck {
 
     private static func runFakeServer() throws {
         var step = 0
+        var shouldHang = false
+        if let marker = ProcessInfo.processInfo.environment["CODEX_METER_TEST_FAIL_FIRST_PATH"],
+           !FileManager.default.fileExists(atPath: marker) {
+            FileManager.default.createFile(atPath: marker, contents: Data())
+            shouldHang = true
+        }
         while let line = readLine() {
             let data = Data(line.utf8)
             guard let message = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -56,13 +64,15 @@ struct AppServerHandshakeCheck {
                 write(["id": id, "result": [:]])
                 step = 1
             case (1, "initialized"):
-                if let marker = ProcessInfo.processInfo.environment["CODEX_METER_TEST_FAIL_FIRST_PATH"],
-                   !FileManager.default.fileExists(atPath: marker) {
-                    FileManager.default.createFile(atPath: marker, contents: Data())
-                    return
-                }
                 step = 2
             case (2, "account/rateLimits/read"):
+                if shouldHang {
+                    Thread.sleep(forTimeInterval: 3)
+                    return
+                }
+                if ProcessInfo.processInfo.environment["CODEX_METER_TEST_FAIL_FIRST_PATH"] != nil {
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
                 guard let id = message["id"] else { exit(22) }
                 write([
                     "id": id,

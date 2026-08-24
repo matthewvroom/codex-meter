@@ -3,9 +3,12 @@ import Foundation
 public actor CodexAppServerClient {
     private let codexHome: URL?
     private let explicitExecutableURL: URL?
+    private let responseTimeout: Duration
+    private let connectionEndDelay: Duration
     private var process: Process?
     private var input: FileHandle?
     private var readTask: Task<Void, Never>?
+    private var connectionID: UUID?
     private var nextID = 1
     private var initializationID: Int?
     private var pendingReads: [Int: CheckedContinuation<RateLimitPayload, Error>] = [:]
@@ -47,9 +50,16 @@ public actor CodexAppServerClient {
         process?.terminate()
     }
 
-    public init(codexHome: URL? = nil, executableURL: URL? = nil) {
+    public init(
+        codexHome: URL? = nil,
+        executableURL: URL? = nil,
+        responseTimeout: Duration = .seconds(12),
+        connectionEndDelay: Duration = .zero
+    ) {
         self.codexHome = codexHome
         self.explicitExecutableURL = executableURL
+        self.responseTimeout = responseTimeout
+        self.connectionEndDelay = connectionEndDelay
     }
 
     public func readRateLimits() async throws -> RateLimitPayload {
@@ -80,7 +90,7 @@ public actor CodexAppServerClient {
                 return
             }
             Task {
-                try? await Task.sleep(for: .seconds(12))
+                try? await Task.sleep(for: responseTimeout)
                 self.timeoutRead(id: id)
             }
         }
@@ -102,7 +112,7 @@ public actor CodexAppServerClient {
                 return
             }
             Task {
-                try? await Task.sleep(for: .seconds(12))
+                try? await Task.sleep(for: responseTimeout)
                 self.timeoutAccountRead(id: id)
             }
         }
@@ -128,7 +138,7 @@ public actor CodexAppServerClient {
                 return
             }
             Task {
-                try? await Task.sleep(for: .seconds(12))
+                try? await Task.sleep(for: responseTimeout)
                 self.timeoutLoginStart(id: id)
             }
         }
@@ -148,6 +158,7 @@ public actor CodexAppServerClient {
     }
 
     public func stop() {
+        connectionID = nil
         readTask?.cancel()
         readTask = nil
         input?.closeFile()
@@ -212,6 +223,8 @@ public actor CodexAppServerClient {
 
         do { try process.run() } catch { throw CodexClientError.launch(error.localizedDescription) }
 
+        let connectionID = UUID()
+        self.connectionID = connectionID
         self.process = process
         self.input = stdin.fileHandleForWriting
         self.readTask = Task { [weak self] in
@@ -220,9 +233,9 @@ public actor CodexAppServerClient {
                     guard let data = line.data(using: .utf8) else { continue }
                     await self?.handle(data)
                 }
-                await self?.connectionEnded()
+                await self?.finishConnection(connectionID: connectionID)
             } catch {
-                await self?.connectionEnded()
+                await self?.finishConnection(connectionID: connectionID)
             }
         }
     }
@@ -323,12 +336,21 @@ public actor CodexAppServerClient {
         if let payload = try? RateLimitParser.parseNotification(data) { latestSnapshot = payload }
     }
 
-    private func connectionEnded() {
+    private func connectionEnded(connectionID: UUID) {
+        // A cancelled reader from an older helper can finish after its replacement starts.
+        // Never let that stale callback clear the new process and input handles.
+        guard self.connectionID == connectionID else { return }
+        self.connectionID = nil
         process = nil
         input = nil
         initializationID = nil
         protocolStage = "app-server disconnected"
         failPending(with: CodexClientError.disconnected)
+    }
+
+    private func finishConnection(connectionID: UUID) async {
+        try? await Task.sleep(for: connectionEndDelay)
+        connectionEnded(connectionID: connectionID)
     }
 
     private func failPending(with error: Error) {
