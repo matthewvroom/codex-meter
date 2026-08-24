@@ -6,7 +6,8 @@ import UserNotifications
 
 enum MenuBarDisplayMode: String, CaseIterable, Identifiable {
     case iconAndPercentage
-    case resetAndPercentage
+    case resetAndPercentage = "resetAndPercentageNoPace"
+    case resetPercentageAndPace = "resetAndPercentage"
     case percentage
     case icon
     case activity
@@ -14,11 +15,12 @@ enum MenuBarDisplayMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .iconAndPercentage: return "Icon + percentage"
-        case .resetAndPercentage: return "Reset + percentage"
-        case .percentage: return "Percentage only"
-        case .icon: return "Icon only"
-        case .activity: return "Activity chart"
+        case .iconAndPercentage: return "Icon + Percentage"
+        case .resetAndPercentage: return "Reset + Percentage"
+        case .resetPercentageAndPace: return "Reset + Percentage + Pace"
+        case .percentage: return "Percentage Only"
+        case .icon: return "Icon Only"
+        case .activity: return "Activity Chart"
         }
     }
 }
@@ -84,9 +86,11 @@ final class UsageStore: ObservableObject {
         activityDisplaySelected: false
     )
     private var loginTasks: [UUID: Task<Void, Never>] = [:]
+    private var celebrationDismissTask: Task<Void, Never>?
+    private var lowUsageAlertState = LowUsageAlertState()
     private var lastUsageDiagnostics: String?
     private static let thresholdKey = "alertThreshold"
-    private static let notifiedResetKey = "lastNotifiedReset"
+    private static let lowUsageAlertStateKey = "lowUsageAlertState"
     private static let displayModeKey = "menuBarDisplayMode"
     private static let inputRateKey = "costInputRate"
     private static let cachedInputRateKey = "costCachedInputRate"
@@ -124,11 +128,15 @@ final class UsageStore: ObservableObject {
         UserDefaults.standard.set(chosenAccountID.uuidString, forKey: Self.activeAccountKey)
         let saved = UserDefaults.standard.integer(forKey: Self.thresholdKey)
         alertThreshold = saved == 0 ? 20 : saved
-        displayMode = MenuBarDisplayMode(rawValue: UserDefaults.standard.string(forKey: Self.displayModeKey) ?? "") ?? .iconAndPercentage
+        displayMode = MenuBarDisplayMode(rawValue: UserDefaults.standard.string(forKey: Self.displayModeKey) ?? "") ?? .resetPercentageAndPace
         inputRate = UserDefaults.standard.double(forKey: Self.inputRateKey)
         cachedInputRate = UserDefaults.standard.double(forKey: Self.cachedInputRateKey)
         outputRate = UserDefaults.standard.double(forKey: Self.outputRateKey)
         currency = DisplayCurrency(rawValue: UserDefaults.standard.string(forKey: Self.currencyKey) ?? "") ?? .usd
+        if let data = UserDefaults.standard.data(forKey: Self.lowUsageAlertStateKey),
+           let decoded = try? JSONDecoder().decode(LowUsageAlertState.self, from: data) {
+            lowUsageAlertState = decoded
+        }
         if previewMode {
             let now = Date()
             payload = RateLimitPayload(
@@ -142,20 +150,24 @@ final class UsageStore: ObservableObject {
                 fetchedAt: now,
                 availableResetCredits: 3
             )
+            let previewTokens: [Int64] = [8_000_000, 0, 5_000, 3_000_000, 0, 0, 9_000_000]
             activity = LocalActivitySnapshot(
-                days: [8, 5, 6, 3, 7, 4, 9].enumerated().map { offset, millions in
+                days: previewTokens.enumerated().map { offset, tokens in
                     DailyTokenUsage(
                         date: Calendar.current.date(byAdding: .day, value: offset - 6, to: Calendar.current.startOfDay(for: now)) ?? now,
-                        usage: TokenUsage(inputTokens: Int64(millions) * 900_000, cachedInputTokens: Int64(millions) * 650_000, outputTokens: Int64(millions) * 100_000, totalTokens: Int64(millions) * 1_000_000)
+                        usage: TokenUsage(inputTokens: tokens, cachedInputTokens: tokens / 2, outputTokens: tokens / 10, totalTokens: tokens)
                     )
                 },
                 models: [
-                    ModelTokenUsage(model: "gpt-5.6-sol", usage: TokenUsage(inputTokens: 25_000_000, cachedInputTokens: 18_000_000, outputTokens: 3_000_000, totalTokens: 28_000_000)),
-                    ModelTokenUsage(model: "gpt-5.6-terra", usage: TokenUsage(inputTokens: 14_000_000, cachedInputTokens: 10_000_000, outputTokens: 2_000_000, totalTokens: 16_000_000))
+                    ModelTokenUsage(model: "gpt-5.6-sol", usage: TokenUsage(inputTokens: 11_000_000, cachedInputTokens: 7_000_000, outputTokens: 1_000_000, totalTokens: 12_000_000)),
+                    ModelTokenUsage(model: "gpt-5.6-terra", usage: TokenUsage(inputTokens: 7_000_000, cachedInputTokens: 4_000_000, outputTokens: 1_000_000, totalTokens: 8_000_000))
                 ],
                 sampledAt: now,
                 filesRead: 12
             )
+            if ProcessInfo.processInfo.arguments.contains("--preview-alert") {
+                celebration = Celebration(title: "Usage running low", subtitle: "16% remains in weekly limit", symbol: "exclamationmark.triangle.fill")
+            }
         }
         if #available(macOS 13.0, *) {
             launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -215,13 +227,27 @@ final class UsageStore: ObservableObject {
         isActivityRefreshing = true
         defer { isActivityRefreshing = false }
         do {
-            activity = try await activityScanner.scan(days: 7)
+            activity = try await scanActivityWithTimeout()
             activityError = nil
             detectTokenMilestone(current: activity)
         } catch is CancellationError {
             return
         } catch {
             activityError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func scanActivityWithTimeout() async throws -> LocalActivitySnapshot {
+        let scanner = activityScanner
+        return try await withThrowingTaskGroup(of: LocalActivitySnapshot.self) { group in
+            group.addTask { try await scanner.scan(days: 7) }
+            group.addTask {
+                try await Task.sleep(for: .seconds(45))
+                throw LocalActivityError.timedOut
+            }
+            guard let result = try await group.next() else { throw LocalActivityError.timedOut }
+            group.cancelAll()
+            return result
         }
     }
 
@@ -416,8 +442,7 @@ final class UsageStore: ObservableObject {
                     activity = nil
                     start()
                 }
-                celebration = Celebration(title: "Account removed", subtitle: "Local credentials were deleted", symbol: "trash")
-                dismissCelebration()
+                showCelebration(Celebration(title: "Account removed", subtitle: "Local credentials were deleted", symbol: "trash"))
             } catch {
                 if wasActive {
                     client = CodexAppServerClient(codexHome: profile.homeURL)
@@ -451,8 +476,7 @@ final class UsageStore: ObservableObject {
                     self.persistAccounts()
                 }
                 self.switchMeterAccount(to: profile.id)
-                self.celebration = Celebration(title: "Account ready", subtitle: "Secure sign-in completed", symbol: "person.crop.circle.badge.checkmark")
-                self.dismissCelebration()
+                self.showCelebration(Celebration(title: "Account ready", subtitle: "Secure sign-in completed", symbol: "person.crop.circle.badge.checkmark"))
             } catch is CancellationError {
                 await loginClient.stop()
             } catch {
@@ -477,8 +501,7 @@ final class UsageStore: ObservableObject {
         let oldTokenStep = UserDefaults.standard.integer(forKey: Self.tokenMilestoneKey)
         if tokenStep >= 1, tokenStep > oldTokenStep, (tokenStep % 10 == 0 || oldTokenStep == 0) {
             UserDefaults.standard.set(tokenStep, forKey: Self.tokenMilestoneKey)
-            celebration = Celebration(title: "Token milestone", subtitle: "You have used \(tokenStep)M local tokens", symbol: "bolt.fill")
-            dismissCelebration()
+            showCelebration(Celebration(title: "Token milestone", subtitle: "This Mac recorded \(tokenStep)M tokens", symbol: "bolt.fill"))
         }
     }
 
@@ -490,26 +513,47 @@ final class UsageStore: ObservableObject {
         let key = "\(activeAccountID.uuidString)-\(currentCount)"
         guard UserDefaults.standard.string(forKey: Self.resetMilestoneKey) != key else { return }
         UserDefaults.standard.set(key, forKey: Self.resetMilestoneKey)
-        celebration = Celebration(title: "Reset banked", subtitle: "\(currentCount) available for this account", symbol: "arrow.counterclockwise.circle.fill")
-        dismissCelebration()
+        showCelebration(Celebration(title: "Reset banked", subtitle: "\(currentCount) available for this account", symbol: "arrow.counterclockwise.circle.fill"))
     }
 
-    private func dismissCelebration() {
-        Task { try? await Task.sleep(for: .seconds(4)); celebration = nil }
+    func dismissCelebration() {
+        celebrationDismissTask?.cancel()
+        celebrationDismissTask = nil
+        celebration = nil
+    }
+
+    private func showCelebration(_ newCelebration: Celebration) {
+        celebrationDismissTask?.cancel()
+        celebration = newCelebration
+        celebrationDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            self?.celebration = nil
+        }
     }
 
     private func notifyIfNeeded(_ payload: RateLimitPayload) async {
-        guard let constrained = payload.snapshot.windows.min(by: { $0.remainingPercent < $1.remainingPercent }),
-              constrained.remainingPercent <= alertThreshold else { return }
+        guard let constrained = payload.snapshot.mostConstrainedWindow else { return }
 
         let fallbackBucket = Int(Date().timeIntervalSince1970 / 86_400)
         let resetComponent = constrained.resetsAt.map { Int($0.timeIntervalSince1970) } ?? fallbackBucket
-        let resetID = "\(constrained.durationMinutes ?? 0)-\(resetComponent)-\(alertThreshold)"
-        guard UserDefaults.standard.string(forKey: Self.notifiedResetKey) != resetID else { return }
+        let resetID = "\(activeAccountID.uuidString)-\(constrained.durationMinutes ?? 0)-\(resetComponent)"
+        let shouldAlert = lowUsageAlertState.observe(
+            windowID: resetID,
+            remainingPercent: constrained.remainingPercent,
+            threshold: alertThreshold
+        )
+        if let encoded = try? JSONEncoder().encode(lowUsageAlertState) {
+            UserDefaults.standard.set(encoded, forKey: Self.lowUsageAlertStateKey)
+        }
+        guard shouldAlert else { return }
 
         if !previewMode {
-            celebration = Celebration(title: "Usage running low", subtitle: "\(constrained.remainingPercent)% remains in the tightest window", symbol: "exclamationmark.triangle.fill")
-            dismissCelebration()
+            showCelebration(Celebration(
+                title: "Usage running low",
+                subtitle: "\(constrained.remainingPercent)% remains in \(constrained.displayName.lowercased())",
+                symbol: "exclamationmark.triangle.fill"
+            ))
         }
 
         let center = UNUserNotificationCenter.current()
@@ -521,7 +565,6 @@ final class UsageStore: ObservableObject {
         content.body = "\(constrained.remainingPercent)% remains. \(ResetTimeFormatter.notificationText(for: constrained.resetsAt))"
         content.sound = .default
         try? await center.add(UNNotificationRequest(identifier: "codex-meter-low-\(resetID)", content: content, trigger: nil))
-        UserDefaults.standard.set(resetID, forKey: Self.notifiedResetKey)
     }
 
     private func persistRates() {

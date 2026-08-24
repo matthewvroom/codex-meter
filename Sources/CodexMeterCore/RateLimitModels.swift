@@ -183,6 +183,38 @@ public struct RateLimitPayload: Equatable, Sendable, Codable {
     }
 }
 
+public struct LowUsageAlertState: Equatable, Sendable, Codable {
+    public private(set) var windowID: String?
+    public private(set) var threshold: Int?
+    public private(set) var lastRemainingPercent: Int?
+    public private(set) var alertedBelowThreshold = false
+
+    public init() {}
+
+    public mutating func observe(windowID: String, remainingPercent: Int, threshold: Int) -> Bool {
+        let remaining = max(0, min(100, remainingPercent))
+        let normalizedThreshold = max(0, min(100, threshold))
+        let isNewWindow = self.windowID != windowID || self.threshold != normalizedThreshold
+
+        if isNewWindow {
+            self.windowID = windowID
+            self.threshold = normalizedThreshold
+            lastRemainingPercent = remaining
+            alertedBelowThreshold = remaining <= normalizedThreshold
+            return remaining <= normalizedThreshold
+        }
+
+        let crossedBelow = (lastRemainingPercent ?? 101) > normalizedThreshold && remaining <= normalizedThreshold
+        if remaining > normalizedThreshold {
+            alertedBelowThreshold = false
+        }
+        let shouldAlert = crossedBelow && !alertedBelowThreshold
+        if shouldAlert { alertedBelowThreshold = true }
+        lastRemainingPercent = remaining
+        return shouldAlert
+    }
+}
+
 public enum RateLimitParser {
     public static func parseResponse(_ data: Data, now: Date = Date()) throws -> RateLimitPayload? {
         let object = try JSONSerialization.jsonObject(with: data)

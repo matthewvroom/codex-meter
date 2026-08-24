@@ -37,6 +37,7 @@ struct ActivityCheck {
         try Data(records.utf8).write(to: archived.appendingPathComponent(name))
 
         let snapshot = try await LocalActivityScanner(roots: [root]).scan(days: 7)
+        precondition(snapshot.days.count == 7)
         precondition(snapshot.total.inputTokens == 180)
         precondition(snapshot.total.cachedInputTokens == 55)
         precondition(snapshot.total.outputTokens == 40)
@@ -48,7 +49,9 @@ struct ActivityCheck {
         let rates = LocalCostRates(inputPerMillion: 2, cachedInputPerMillion: 0.5, outputPerMillion: 8)
         let expected = 125.0 / 1_000_000 * 2 + 55.0 / 1_000_000 * 0.5 + 40.0 / 1_000_000 * 8
         precondition(abs(rates.estimate(snapshot.total) - expected) < 0.0000001)
-        precondition(OpenAIPriceCatalog.price(for: "gpt-5.6-sol")?.inputPerMillion == 5)
+        precondition(OpenAIPriceCatalog.price(for: "gpt-5.6-sol")?.inputPerMillion == 4)
+        precondition(OpenAIPriceCatalog.price(for: "gpt-5.6-terra")?.outputPerMillion == 12)
+        precondition(OpenAIPriceCatalog.price(for: "gpt-5.6-luna")?.cachedInputPerMillion == 0.02)
         precondition(OpenAIPriceCatalog.price(for: "not-a-real-model") == nil)
         let official = OpenAIPriceCatalog.estimate(snapshot.models)
         precondition(official > 0)
@@ -77,6 +80,31 @@ struct ActivityCheck {
             .write(to: unknownRoot.appendingPathComponent("rollout-unknown.jsonl"))
         let unknown = try await LocalActivityScanner(roots: [unknownRoot]).scan(days: 1)
         precondition(unknown.models.first?.model == "unknown")
+
+        let timezoneRoot = root.appendingPathComponent("timezone", isDirectory: true)
+        try FileManager.default.createDirectory(at: timezoneRoot, withIntermediateDirectories: true)
+        let sundayRecord = """
+        {"timestamp":"2026-08-23T23:30:00-07:00","type":"turn_context","payload":{"model":"gpt-5.6-luna"}}
+        {"timestamp":"2026-08-23T23:30:01-07:00","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":10},"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":10}}}}
+        """
+        let mondayRecord = """
+        {"timestamp":"2026-08-24T00:30:00-07:00","type":"turn_context","payload":{"model":"gpt-5.6-luna"}}
+        {"timestamp":"2026-08-24T00:30:01-07:00","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20,"cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":20},"total_token_usage":{"input_tokens":20,"cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":20}}}}
+        """
+        try Data(sundayRecord.utf8).write(to: timezoneRoot.appendingPathComponent("rollout-sunday.jsonl"))
+        try Data(mondayRecord.utf8).write(to: timezoneRoot.appendingPathComponent("rollout-monday.jsonl"))
+        var pacificCalendar = Calendar(identifier: .gregorian)
+        pacificCalendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let pacificNow = ISO8601DateFormatter().date(from: "2026-08-24T01:00:00-07:00")!
+        let timezoneSnapshot = try await LocalActivityScanner(
+            roots: [timezoneRoot],
+            calendar: pacificCalendar
+        ).scan(days: 2, now: pacificNow)
+        precondition(timezoneSnapshot.days.count == 2)
+        precondition(timezoneSnapshot.days[0].usage.totalTokens == 10)
+        precondition(timezoneSnapshot.days[1].usage.totalTokens == 20)
+        precondition(pacificCalendar.component(.weekday, from: timezoneSnapshot.days[0].date) == 1)
+        precondition(pacificCalendar.component(.weekday, from: timezoneSnapshot.days[1].date) == 2)
 
         let invalidRoot = root.appendingPathComponent("invalid", isDirectory: true)
         try FileManager.default.createDirectory(at: invalidRoot, withIntermediateDirectories: true)

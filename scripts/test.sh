@@ -18,6 +18,12 @@ swiftc \
 "$TMP/weekly-pace-check"
 
 swiftc \
+  "$ROOT/Sources/CodexMeterCore/RateLimitModels.swift" \
+  "$ROOT/Tests/LowUsageAlertCheck.swift" \
+  -o "$TMP/low-usage-alert-check"
+"$TMP/low-usage-alert-check"
+
+swiftc \
   "$ROOT/Sources/CodexMeterCore/LocalActivity.swift" \
   "$ROOT/Tests/ActivityCheck.swift" \
   -o "$TMP/activity-check"

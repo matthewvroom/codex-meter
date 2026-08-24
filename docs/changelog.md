@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.4 — 2026-08-24
+
+- Fit the popover to its visible content and cap it to the current screen before enabling one scrolling body.
+- Clear unsolicited first-responder highlights when the popover opens and make in-app notices dismissible.
+- Trigger low-usage alerts only on a threshold crossing for the selected limiting window.
+- Separate Reset + Percentage from Reset + Percentage + Pace, make the pace variant the fresh-install default and capitalize mode names.
+- Move refresh time beside the refresh control and keep the full plan name beneath the app title.
+- Rename Local Activity to This Mac Activity, bound long scans, make zero and tiny days visible, and clarify that estimates are not subscription charges.
+- Refresh bundled GPT-5.6 standard API prices from the official model pages and leave unknown models unpriced in the app.
+
 ## 1.6.3 — 2026-08-21
 
 - Refine the borderless badge typography and add a symmetric, one-pixel center pace marker with a knockout through the rail.

@@ -4,25 +4,38 @@ import SwiftUI
 
 struct MeterView: View {
     @ObservedObject var store: UsageStore
+    let onPreferredSizeChange: (NSSize) -> Void
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("usageWindowsExpanded") private var usageWindowsExpanded = true
     @AppStorage("localActivityExpanded") private var localActivityExpanded = true
     @AppStorage("settingsExpanded") private var settingsExpanded = false
+    @State private var panelContentHeight: CGFloat = 1
+
+    init(store: UsageStore, onPreferredSizeChange: @escaping (NSSize) -> Void = { _ in }) {
+        self.store = store
+        self.onPreferredSizeChange = onPreferredSizeChange
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
                 header
                 Divider()
-                ViewThatFits(in: .vertical) {
+                ScrollView {
                     panelSections
-                    ScrollView { panelSections }
-                        .frame(height: 700)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .background {
+                            GeometryReader { geometry in
+                                Color.clear.preference(key: PanelHeightKey.self, value: geometry.size.height)
+                            }
+                        }
                 }
-                .frame(maxHeight: 700, alignment: .top)
+                .scrollDisabled(panelContentHeight <= maximumPanelHeight)
+                .frame(height: min(panelContentHeight, maximumPanelHeight), alignment: .top)
             }
+            .allowsHitTesting(store.celebration == nil)
             if let celebration = store.celebration {
-                CelebrationBanner(celebration: celebration)
+                CelebrationBanner(celebration: celebration, dismiss: store.dismissCelebration)
                     .padding(.top, 10)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(2)
@@ -38,9 +51,18 @@ struct MeterView: View {
                 .stroke(Color.white.opacity(colorScheme == .dark ? 0.12 : 0.42), lineWidth: 0.75)
         }
         .onAppear { store.setLocalActivityExpanded(localActivityExpanded) }
+        .onPreferenceChange(PanelHeightKey.self) { height in
+            panelContentHeight = max(1, height)
+            onPreferredSizeChange(NSSize(width: 348, height: min(max(1, height), maximumPanelHeight) + 82))
+        }
         .onChange(of: localActivityExpanded) { expanded in
             store.setLocalActivityExpanded(expanded)
         }
+    }
+
+    private var maximumPanelHeight: CGFloat {
+        let screenHeight = NSScreen.main?.visibleFrame.height ?? 900
+        return min(700, max(260, screenHeight * 0.82 - 82))
     }
 
     private var panelSections: some View {
@@ -52,7 +74,7 @@ struct MeterView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.28 : 0.14))
@@ -72,24 +94,29 @@ struct MeterView: View {
             }
             Spacer()
             accountMenu
-            Button {
-                Task {
-                    await store.refresh()
-                    await store.refreshActivity(force: true)
+            VStack(spacing: 1) {
+                Button {
+                    Task {
+                        await store.refresh()
+                        await store.refreshActivity(force: true)
+                    }
+                } label: {
+                    if store.isRefreshing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
                 }
-            } label: {
-                if store.isRefreshing {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                        .rotationEffect(.degrees(store.isRefreshing ? 360 : 0))
-                        .animation(.linear(duration: 0.8).repeatForever(autoreverses: false), value: store.isRefreshing)
-                }
+                .buttonStyle(.plain)
+                .help("Refresh usage")
+                .disabled(store.isRefreshing)
+                .accessibilityLabel("Refresh Codex usage")
+                Text(refreshCaption)
+                    .font(.system(size: 8, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(store.isStale ? Color.orange : Color.secondary)
             }
-            .buttonStyle(.plain)
-            .help("Refresh usage")
-            .disabled(store.isRefreshing)
-            .accessibilityLabel("Refresh Codex usage")
+            .frame(width: 38)
         }
         .padding(16)
     }
@@ -135,7 +162,7 @@ struct MeterView: View {
                     .foregroundStyle(.secondary)
             }
             .font(.system(size: 11, weight: .medium))
-            .frame(maxWidth: 112)
+            .frame(maxWidth: 92)
         }
         .menuStyle(.borderlessButton)
         .focusable(false)
@@ -162,10 +189,10 @@ struct MeterView: View {
             if let activity = store.activity {
                 Divider()
                 DisclosureGroup(isExpanded: $localActivityExpanded) {
-                    LocalActivityView(activity: activity, rates: store.costRates, currency: store.currency, totalSavings: store.totalSavings)
+                    ThisMacActivityView(activity: activity, currency: store.currency, totalSavings: store.totalSavings)
                         .padding(.horizontal, -16)
                 } label: {
-                    SectionLabel(title: "Local activity", detail: "\(compactTokens(activity.total.totalTokens)) tokens")
+                    SectionLabel(title: "This Mac activity", detail: "\(compactTokens(activity.total.totalTokens)) tokens")
                 }
                 .padding(16)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -178,14 +205,15 @@ struct MeterView: View {
                 DisclosureGroup(isExpanded: $localActivityExpanded) {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
-                        Text("Scanning local logs…")
+                        Text("Scanning recent logs on this Mac…")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer()
                     }
                     .padding(.top, 10)
                 } label: {
-                    SectionLabel(title: "Local activity", detail: "Updating")
+                    SectionLabel(title: "This Mac activity", detail: "Updating")
                 }
                 .padding(16)
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -199,7 +227,7 @@ struct MeterView: View {
                     Image(systemName: "exclamationmark.circle")
                         .foregroundStyle(.orange)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Local activity unavailable")
+                        Text("This Mac activity unavailable")
                             .font(.system(size: 11, weight: .medium))
                         Text(activityError)
                             .font(.system(size: 10))
@@ -208,6 +236,23 @@ struct MeterView: View {
                     Spacer()
                 }
                 .padding(16)
+            } else {
+                Divider()
+                DisclosureGroup(isExpanded: $localActivityExpanded) {
+                    Text("Open this section to scan recent Codex session logs on this Mac.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 8)
+                } label: {
+                    SectionLabel(title: "This Mac activity", detail: "Open to scan")
+                }
+                .padding(16)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.3), lineWidth: 0.6)
+                }
             }
         }
     }
@@ -321,7 +366,8 @@ struct MeterView: View {
                     }
                 }
                 .labelsHidden()
-                .frame(width: 150)
+                .font(.system(size: 10))
+                .frame(width: 210)
             }
             HStack {
                 Text("Currency")
@@ -347,19 +393,6 @@ struct MeterView: View {
                 .labelsHidden()
                 .frame(width: 72)
             }
-            DisclosureGroup("Fallback USD price for unknown models") {
-                VStack(spacing: 7) {
-                    CostRateField(label: "Input", value: $store.inputRate)
-                    CostRateField(label: "Cached input", value: $store.cachedInputRate)
-                    CostRateField(label: "Output", value: $store.outputRate)
-                    Text("Only used when a model has no bundled official price. USD per million tokens.")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.top, 6)
-            }
-            .font(.system(size: 11))
             Toggle("Launch at login", isOn: Binding(
                 get: { store.launchAtLogin },
                 set: { store.setLaunchAtLogin($0) }
@@ -380,11 +413,16 @@ struct MeterView: View {
     }
 
     private var headerSubtitle: String {
-        if store.isStale { return "Last update is stale" }
-        if let date = store.payload?.fetchedAt {
-            return "Updated \(date.formatted(date: .omitted, time: .shortened))\(store.planLabel.map { " · \($0)" } ?? "")"
-        }
+        if store.isStale { return "Usage data is stale" }
+        if let plan = store.planLabel { return "\(plan) plan" }
         return "Signed in through the Codex app"
+    }
+
+    private var refreshCaption: String {
+        if store.isRefreshing { return "Now" }
+        guard let date = store.payload?.fetchedAt else { return "--" }
+        let localized = date.formatted(date: .omitted, time: .shortened)
+        return String(localized.prefix(while: { !$0.isWhitespace }))
     }
 
     private func compactTokens(_ value: Int64) -> String {
@@ -392,6 +430,13 @@ struct MeterView: View {
         if value >= 1_000_000 { return String(format: "%.1fM", Double(value) / 1_000_000) }
         if value >= 1_000 { return String(format: "%.1fK", Double(value) / 1_000) }
         return "\(value)"
+    }
+}
+
+private struct PanelHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 1
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -410,6 +455,7 @@ private struct SectionLabel: View {
 
 private struct CelebrationBanner: View {
     let celebration: Celebration
+    let dismiss: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -424,19 +470,24 @@ private struct CelebrationBanner: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button(action: dismiss) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss notification")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.accentColor.opacity(0.35)))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.accentColor.opacity(0.55), lineWidth: 1))
         .padding(.horizontal, 12)
         .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
     }
 }
 
-private struct LocalActivityView: View {
+private struct ThisMacActivityView: View {
     let activity: LocalActivitySnapshot
-    let rates: LocalCostRates
     let currency: DisplayCurrency
     let totalSavings: Double
     @AppStorage("localActivityModelsExpanded") private var modelsExpanded = false
@@ -446,9 +497,9 @@ private struct LocalActivityView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Local activity")
+                    Text("This Mac activity")
                         .font(.system(size: 12, weight: .medium))
-                    Text("Seven days · read from local session logs")
+                    Text("Seven days · recorded in Codex session logs on this Mac")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
@@ -465,7 +516,7 @@ private struct LocalActivityView: View {
 
             if activity.summarizedLargeFiles > 0 {
                 Label(
-                    "\(activity.summarizedLargeFiles) oversized \(activity.summarizedLargeFiles == 1 ? "log" : "logs") summarized for performance",
+                    "\(activity.summarizedLargeFiles) large \(activity.summarizedLargeFiles == 1 ? "log uses" : "logs use") recent-tail summaries; totals may be incomplete",
                     systemImage: "bolt.fill"
                 )
                 .font(.system(size: 9))
@@ -473,12 +524,25 @@ private struct LocalActivityView: View {
             }
 
             Chart(activity.days) { day in
-                BarMark(
-                    x: .value("Day", day.date, unit: .day),
-                    y: .value("Tokens", day.usage.totalTokens)
-                )
-                .foregroundStyle(Color.accentColor)
-                .cornerRadius(2)
+                if day.usage.totalTokens == 0 {
+                    PointMark(
+                        x: .value("Day", day.date, unit: .day),
+                        y: .value("Tokens", 0)
+                    )
+                    .symbolSize(9)
+                    .foregroundStyle(Color.secondary.opacity(0.55))
+                    .accessibilityLabel(day.date.formatted(.dateTime.weekday(.wide)))
+                    .accessibilityValue("0 tokens")
+                } else {
+                    BarMark(
+                        x: .value("Day", day.date, unit: .day),
+                        y: .value("Tokens", visibleTokenValue(day.usage.totalTokens))
+                    )
+                    .foregroundStyle(day.id == activity.days.last?.id ? Color.accentColor : Color.accentColor.opacity(0.62))
+                    .cornerRadius(2)
+                    .accessibilityLabel(day.date.formatted(.dateTime.weekday(.wide)))
+                    .accessibilityValue("\(day.usage.totalTokens) tokens")
+                }
             }
             .chartXAxis {
                 AxisMarks(values: .stride(by: .day)) { value in
@@ -487,7 +551,7 @@ private struct LocalActivityView: View {
             }
             .chartYAxis(.hidden)
             .frame(height: 62)
-            .accessibilityLabel("Seven-day local token activity")
+            .accessibilityLabel("Seven-day token activity recorded on this Mac")
             .accessibilityValue(accessibilitySummary)
 
             if !visibleModels.isEmpty {
@@ -503,11 +567,6 @@ private struct LocalActivityView: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .frame(width: 82, alignment: .trailing)
-                            Text(modelCost(item))
-                                .monospacedDigit()
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.72)
-                                .frame(width: 88, alignment: .trailing)
                         }
                         .font(.system(size: 10))
                         .accessibilityElement(children: .combine)
@@ -534,11 +593,18 @@ private struct LocalActivityView: View {
 
             DisclosureGroup(isExpanded: $estimatesExpanded) {
                 VStack(alignment: .leading, spacing: 5) {
-                    LabeledContent("API-equivalent estimate", value: formatted(automaticEstimate))
+                    LabeledContent("Priced-model API equivalent", value: formatted(automaticEstimate))
                     if totalSavings > 0 {
                         LabeledContent("Hypothetical difference vs GPT-5.6 Sol", value: formatted(totalSavings))
                     }
-                    Text("Standard API prices checked 15 Jul 2026. These are comparisons, not subscription charges or realized savings.")
+                    Divider()
+                    ForEach(activity.models) { item in
+                        LabeledContent(item.model, value: modelCost(item))
+                            .lineLimit(1)
+                    }
+                    Text("Recognized prices cover \(pricedCoveragePercent)% of recorded tokens in this view.")
+                        .foregroundStyle(.secondary)
+                    Text("Standard API prices checked \(OpenAIPriceCatalog.effectiveDate). This estimates standard API pricing only for recognized models in logs on this Mac. It is not your ChatGPT or Codex subscription bill; unpriced models and other machines are excluded.")
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -560,7 +626,7 @@ private struct LocalActivityView: View {
     private var automaticEstimate: Double {
         let usd = activity.models.reduce(0) { total, item in
             if let price = OpenAIPriceCatalog.price(for: item.model) { return total + price.estimate(item.usage) }
-            return total + (rates.isConfigured ? rates.estimate(item.usage) : 0)
+            return total
         }
         return currency.convertFromUSD(usd)
     }
@@ -569,13 +635,20 @@ private struct LocalActivityView: View {
         if let price = OpenAIPriceCatalog.price(for: item.model) {
             return formatted(currency.convertFromUSD(price.estimate(item.usage)))
         }
-        if rates.isConfigured { return formatted(currency.convertFromUSD(rates.estimate(item.usage))) + "*" }
         return "Unpriced"
     }
 
     private func modelShare(_ item: ModelTokenUsage) -> String {
         guard activity.total.totalTokens > 0 else { return "0%" }
         return "\(Int((Double(item.usage.totalTokens) / Double(activity.total.totalTokens) * 100).rounded()))% · \(compactTokens(item.usage.totalTokens))"
+    }
+
+    private var pricedCoveragePercent: Int {
+        guard activity.total.totalTokens > 0 else { return 0 }
+        let pricedTokens = activity.models.reduce(Int64(0)) { total, item in
+            OpenAIPriceCatalog.price(for: item.model) == nil ? total : total + item.usage.totalTokens
+        }
+        return Int((Double(pricedTokens) / Double(activity.total.totalTokens) * 100).rounded())
     }
 
     private func formatted(_ amount: Double) -> String {
@@ -594,22 +667,10 @@ private struct LocalActivityView: View {
             "\(day.date.formatted(.dateTime.weekday(.wide))): \(day.usage.totalTokens) tokens"
         }.joined(separator: ", ")
     }
-}
 
-private struct CostRateField: View {
-    let label: String
-    @Binding var value: Double
-
-    var body: some View {
-        HStack {
-            Text(label)
-            Spacer()
-            TextField("0", value: $value, format: .number.precision(.fractionLength(0...2)))
-                .multilineTextAlignment(.trailing)
-                .frame(width: 58)
-            Text("$/M")
-                .foregroundStyle(.secondary)
-        }
+    private func visibleTokenValue(_ tokens: Int64) -> Double {
+        let maximum = Double(activity.days.map(\.usage.totalTokens).max() ?? 1)
+        return max(Double(tokens), maximum * 0.035)
     }
 }
 

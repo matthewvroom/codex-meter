@@ -53,6 +53,7 @@ public enum LocalActivityError: LocalizedError, Equatable {
     case filterUnavailable
     case filterFailed
     case unsupportedRecords
+    case timedOut
 
     public var errorDescription: String? {
         switch self {
@@ -60,6 +61,7 @@ public enum LocalActivityError: LocalizedError, Equatable {
         case .filterUnavailable: return "The local history filter could not be started."
         case .filterFailed: return "Local Codex session history could not be filtered."
         case .unsupportedRecords: return "Codex returned an unsupported local usage record format."
+        case .timedOut: return "This Mac activity scan took too long and was stopped. Try Refresh again after closing inactive Codex tasks."
         }
     }
 }
@@ -131,13 +133,13 @@ public struct ModelPrice: Codable, Equatable, Identifiable, Sendable {
 }
 
 public enum OpenAIPriceCatalog {
-    public static let effectiveDate = "2026-07-15"
+    public static let effectiveDate = "2026-08-24"
     public static let sourceURL = URL(string: "https://developers.openai.com/api/docs/models")!
     public static let prices: [ModelPrice] = [
-        .init(model: "gpt-5.6-sol", inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 30),
-        .init(model: "gpt-5.6", inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 30),
-        .init(model: "gpt-5.6-terra", inputPerMillion: 2.5, cachedInputPerMillion: 0.25, outputPerMillion: 15),
-        .init(model: "gpt-5.6-luna", inputPerMillion: 1, cachedInputPerMillion: 0.1, outputPerMillion: 6),
+        .init(model: "gpt-5.6-sol", inputPerMillion: 4, cachedInputPerMillion: 0.4, outputPerMillion: 20),
+        .init(model: "gpt-5.6", inputPerMillion: 4, cachedInputPerMillion: 0.4, outputPerMillion: 20),
+        .init(model: "gpt-5.6-terra", inputPerMillion: 2, cachedInputPerMillion: 0.2, outputPerMillion: 12),
+        .init(model: "gpt-5.6-luna", inputPerMillion: 0.2, cachedInputPerMillion: 0.02, outputPerMillion: 1.2),
         .init(model: "gpt-5.5", inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 30),
         .init(model: "gpt-5.4", inputPerMillion: 2.5, cachedInputPerMillion: 0.25, outputPerMillion: 15),
         .init(model: "gpt-5.4-mini", inputPerMillion: 0.75, cachedInputPerMillion: 0.075, outputPerMillion: 4.5)

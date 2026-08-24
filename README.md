@@ -4,7 +4,7 @@
 
 <h1 align="center">Codex Meter</h1>
 
-<p align="center"><strong>Your Codex limits, reset times, model usage and local cost estimate—right in the macOS menu bar.</strong></p>
+<p align="center"><strong>Your Codex limits, reset times, model usage and API-equivalent estimate—right in the macOS menu bar.</strong></p>
 
 <p align="center">No extra account. No analytics. No Electron. Just one small native Mac app doing one useful job.</p>
 
@@ -25,7 +25,7 @@ I built this because I wanted one simple answer sitting in the menu bar: **how m
 
 | Quota | Local insight | Cost | Automation |
 | --- | --- | --- | --- |
-| Remaining percentage | Seven-day native chart | Official per-model rates | Universal CLI |
+| Remaining percentage | Seven-day This Mac chart | Official per-model rates | Universal CLI |
 | Exact reset time | Model-by-model usage | USD, AUD or EUR | JSON output |
 | Honest stale/error state | Prompts stay ignored | Unknown models stay unpriced | Threshold exit codes |
 
@@ -41,7 +41,7 @@ The complete Swift source, local-log parser, build scripts and release automatio
 
 ### A true one-job Mac app
 
-No Electron runtime, background helper daemon, analytics SDK or external database. The native app sleeps between quota checks and scans local activity only when its panel or menu-bar activity mode needs it.
+No Electron runtime, background helper daemon, analytics SDK or external database. The native app sleeps between quota checks and scans this Mac's activity only when its panel or menu-bar activity mode needs it.
 
 ### Power without a privacy trade-off
 
@@ -53,10 +53,10 @@ Alert thresholds, menu-bar modes, history charts, cost rates and CLI automation 
 - Shows weekly pace against an even seven-day allowance, with a compact reset, percentage and pace badge.
 - Breaks down every available usage window with a percentage and local reset time.
 - Refreshes automatically every two minutes, with manual refresh when you want it.
-- Warns you when remaining usage drops below 10%, 20%, or 30%.
+- Warns once when remaining usage crosses below 10%, 20%, or 30%, then waits for recovery or a new reset window.
 - Detects stale or unavailable data instead of leaving a misleading old number visible.
-- Builds a seven-day token activity chart from aggregate events in local Codex session logs.
-- Breaks local usage down by the actual model recorded for each Codex turn.
+- Builds a seven-day This Mac activity chart from aggregate events in Codex session logs on this machine.
+- Breaks this Mac's recorded usage down by the actual model recorded for each Codex turn.
 - Automatically calculates an API-equivalent estimate with bundled official OpenAI standard prices.
 - Displays estimates in USD, AUD or EUR with a dated local ECB reference-rate snapshot.
 - Adds accounts through OpenAI's secure browser login, then hot-swaps profiles from the account menu beside refresh.
@@ -64,7 +64,7 @@ Alert thresholds, menu-bar modes, history charts, cost rates and CLI automation 
 - For a desktop swap, signs Codex out through the official app-server method, completes OpenAI's browser login, verifies the account and relaunches Codex.
 - Deletes unused local account profiles and their saved Codex credentials with confirmation, including stale records whose folder is already gone.
 - Shows OpenAI's real banked-reset count when the account returns it, and celebrates reset and token milestones.
-- Switches between icon + percentage, reset + percentage, percentage-only, icon-only and activity-chart menu-bar modes.
+- Switches between Icon + Percentage, Reset + Percentage, Reset + Percentage + Pace, Percentage Only, Icon Only and Activity Chart menu-bar modes.
 - Includes a universal `codex-meter` CLI with stable text/JSON output and threshold exit codes.
 - Supports launch at login without adding a Dock icon.
 - Keeps usage windows, activity, accounts and settings collapsible so the popover stays calm.

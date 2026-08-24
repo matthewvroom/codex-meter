@@ -40,7 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: MeterView(store: store))
+        popover.contentSize = NSSize(width: 348, height: 520)
+        popover.contentViewController = NSHostingController(rootView: MeterView(store: store) { [weak self] size in
+            self?.popover.contentSize = size
+        })
 
         if windowedMode {
             let window = NSWindow(
@@ -50,7 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 defer: false
             )
             window.title = "Codex Meter"
-            window.contentViewController = NSHostingController(rootView: MeterView(store: store))
+            window.contentViewController = NSHostingController(rootView: MeterView(store: store) { [weak window] size in
+                window?.setContentSize(size)
+            })
             window.center()
             window.makeKeyAndOrderFront(nil)
             previewWindow = window
@@ -89,6 +94,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             store.setPopoverVisible(true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
+            popover.contentViewController?.view.window?.makeFirstResponder(nil)
+            DispatchQueue.main.async { [weak self] in
+                self?.popover.contentViewController?.view.window?.makeFirstResponder(nil)
+            }
         }
     }
 
@@ -115,7 +124,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 button.title = "\(remaining)%"
             case .resetAndPercentage:
                 let countdown = ResetCountdownFormatter.format(until: window.resetsAt)
-                button.image = weeklyBadgeImage(countdown: countdown, remaining: remaining, pace: WeeklyPace(window: window))
+                button.image = weeklyBadgeImage(countdown: countdown, remaining: remaining, pace: nil, showsPace: false)
+                button.imagePosition = .imageOnly
+                button.title = ""
+            case .resetPercentageAndPace:
+                let countdown = ResetCountdownFormatter.format(until: window.resetsAt)
+                button.image = weeklyBadgeImage(
+                    countdown: countdown,
+                    remaining: remaining,
+                    pace: WeeklyPace(window: window),
+                    showsPace: true
+                )
                 button.imagePosition = .imageOnly
                 button.title = ""
             case .percentage:
@@ -153,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         button.setAccessibilityLabel(button.toolTip ?? "Codex usage")
     }
 
-    private func weeklyBadgeImage(countdown: ResetCountdown, remaining: Int, pace: WeeklyPace?) -> NSImage {
+    private func weeklyBadgeImage(countdown: ResetCountdown, remaining: Int, pace: WeeklyPace?, showsPace: Bool) -> NSImage {
         let size = NSSize(width: 58, height: 18)
         let image = NSImage(size: size, flipped: false) { _ in
             NSColor.black.setFill()
@@ -185,8 +204,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 .paragraphStyle: percentParagraph
             ]
             NSAttributedString(string: "\(remaining)%", attributes: percentAttributes)
-                .draw(in: NSRect(x: 21, y: 7.75, width: 34, height: 10.25))
+                .draw(in: NSRect(x: 21, y: showsPace ? 7.75 : 4.25, width: 34, height: 10.25))
 
+            guard showsPace else { return true }
             let rail = NSRect(x: 25, y: 2.5, width: 27, height: 3)
             NSBezierPath(roundedRect: rail, xRadius: 1.5, yRadius: 1.5).fill()
             let centerLineWidth: CGFloat = 0.5
@@ -207,7 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = "\(remaining) percent remaining, \(countdown.accessibilityText)\(pace.map { ", weekly pace \($0.summaryText)" } ?? "")"
+        image.accessibilityDescription = "\(remaining) percent remaining, \(countdown.accessibilityText)\(showsPace ? pace.map { ", weekly pace \($0.summaryText)" } ?? "" : "")"
         return image
     }
 
