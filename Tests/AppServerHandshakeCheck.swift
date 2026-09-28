@@ -43,6 +43,18 @@ struct AppServerHandshakeCheck {
         await retryingClient.stop()
         unsetenv("CODEX_METER_TEST_FAIL_FIRST_PATH")
         try? FileManager.default.removeItem(at: retryMarker)
+
+        let initializationMarker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-meter-initialize-retry-\(UUID().uuidString)")
+        setenv("CODEX_METER_TEST_HANG_INITIALIZE_PATH", initializationMarker.path, 1)
+        let initializingClient = CodexAppServerClient(
+            executableURL: URL(fileURLWithPath: CommandLine.arguments[0])
+        )
+        let initializedPayload = try await initializingClient.readRateLimits()
+        precondition(initializedPayload.snapshot.secondary?.remainingPercent == 56)
+        await initializingClient.stop()
+        unsetenv("CODEX_METER_TEST_HANG_INITIALIZE_PATH")
+        try? FileManager.default.removeItem(at: initializationMarker)
         print("Deterministic app-server initialization handshake passed")
     }
 
@@ -54,12 +66,22 @@ struct AppServerHandshakeCheck {
             FileManager.default.createFile(atPath: marker, contents: Data())
             shouldHang = true
         }
+        var shouldHangInitialization = false
+        if let marker = ProcessInfo.processInfo.environment["CODEX_METER_TEST_HANG_INITIALIZE_PATH"],
+           !FileManager.default.fileExists(atPath: marker) {
+            FileManager.default.createFile(atPath: marker, contents: Data())
+            shouldHangInitialization = true
+        }
         while let line = readLine() {
             let data = Data(line.utf8)
             guard let message = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let method = message["method"] as? String else { exit(20) }
             switch (step, method) {
             case (0, "initialize"):
+                if shouldHangInitialization {
+                    Thread.sleep(forTimeInterval: 6)
+                    return
+                }
                 guard let id = message["id"] else { exit(21) }
                 write(["id": id, "result": [:]])
                 step = 1

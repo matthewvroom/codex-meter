@@ -165,6 +165,7 @@ public actor CodexAppServerClient {
         input = nil
         if process?.isRunning == true { process?.terminate() }
         process = nil
+        initializationID = nil
         failPending(with: CodexClientError.disconnected)
     }
 

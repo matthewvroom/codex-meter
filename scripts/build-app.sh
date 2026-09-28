@@ -12,15 +12,17 @@ trap 'rm -rf "$STAGE"' EXIT
 cd "$ROOT"
 swift build -c release --triple arm64-apple-macosx13.0 --scratch-path "$ROOT/.build-arm64"
 swift build -c release --triple x86_64-apple-macosx13.0 --scratch-path "$ROOT/.build-x86_64"
+ARM64_BIN="$(swift build -c release --triple arm64-apple-macosx13.0 --scratch-path "$ROOT/.build-arm64" --show-bin-path)"
+X86_64_BIN="$(swift build -c release --triple x86_64-apple-macosx13.0 --scratch-path "$ROOT/.build-x86_64" --show-bin-path)"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 xcrun lipo -create \
-  "$ROOT/.build-arm64/arm64-apple-macosx/release/CodexMeter" \
-  "$ROOT/.build-x86_64/x86_64-apple-macosx/release/CodexMeter" \
+  "$ARM64_BIN/CodexMeter" \
+  "$X86_64_BIN/CodexMeter" \
   -output "$APP/Contents/MacOS/CodexMeter"
 xcrun lipo -create \
-  "$ROOT/.build-arm64/arm64-apple-macosx/release/codex-meter" \
-  "$ROOT/.build-x86_64/x86_64-apple-macosx/release/codex-meter" \
+  "$ARM64_BIN/codex-meter" \
+  "$X86_64_BIN/codex-meter" \
   -output "$STAGE/codex-meter"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 

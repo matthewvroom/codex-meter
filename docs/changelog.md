@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.8
+
+- Recover from an app-server initialization timeout without leaving future usage refreshes stuck.
+- Cover a timed-out first handshake followed by a successful retry in the deterministic app-server test.
+- Resolve universal build products through Swift so packaging works with newer toolchains.
+
 ## 1.6.7
 
 - Prevent a retiring Codex helper's delayed disconnect callback from clearing the replacement helper's live connection.
