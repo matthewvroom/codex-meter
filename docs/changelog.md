@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.9
+
+- Discover the Codex CLI bundled in current ChatGPT.app builds without changing executable override precedence.
+- Cover the new helper path and missing-executable error in the app-server test.
+
 ## 1.6.8
 
 - Recover from an app-server initialization timeout without leaving future usage refreshes stuck.

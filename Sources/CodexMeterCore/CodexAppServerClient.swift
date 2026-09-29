@@ -3,6 +3,7 @@ import Foundation
 public actor CodexAppServerClient {
     private let codexHome: URL?
     private let explicitExecutableURL: URL?
+    private let candidatePaths: [String]?
     private let responseTimeout: Duration
     private let connectionEndDelay: Duration
     private var process: Process?
@@ -21,7 +22,7 @@ public actor CodexAppServerClient {
     private var protocolStage = "not started"
 
     private var executableCandidates: [String] {
-        Self.executableCandidatePaths()
+        candidatePaths ?? Self.executableCandidatePaths()
     }
 
     public static func executableCandidatePaths(
@@ -32,6 +33,7 @@ public actor CodexAppServerClient {
             environment["CODEX_PATH"],
             "/Applications/Codex.app/Contents/Resources/codex",
             "/Applications/ChatGPT.app/Contents/Resources/codex",
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex",
             "\(home)/.local/bin/codex",
@@ -54,12 +56,14 @@ public actor CodexAppServerClient {
         codexHome: URL? = nil,
         executableURL: URL? = nil,
         responseTimeout: Duration = .seconds(12),
-        connectionEndDelay: Duration = .zero
+        connectionEndDelay: Duration = .zero,
+        candidatePaths: [String]? = nil
     ) {
         self.codexHome = codexHome
         self.explicitExecutableURL = executableURL
         self.responseTimeout = responseTimeout
         self.connectionEndDelay = connectionEndDelay
+        self.candidatePaths = candidatePaths
     }
 
     public func readRateLimits() async throws -> RateLimitPayload {

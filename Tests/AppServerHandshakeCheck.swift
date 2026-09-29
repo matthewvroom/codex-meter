@@ -15,12 +15,24 @@ struct AppServerHandshakeCheck {
             home: "/Users/tester",
             environment: ["CODEX_PATH": "/custom/codex"]
         )
-        precondition(candidates.prefix(4).elementsEqual([
+        precondition(candidates.prefix(5).elementsEqual([
             "/custom/codex",
             "/Applications/Codex.app/Contents/Resources/codex",
             "/Applications/ChatGPT.app/Contents/Resources/codex",
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
             "/opt/homebrew/bin/codex"
         ]))
+
+        let missingPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-meter-missing-\(UUID().uuidString)").path
+        let missingClient = CodexAppServerClient(candidatePaths: [missingPath])
+        do {
+            _ = try await missingClient.readRateLimits()
+            preconditionFailure("Expected the missing-executable error")
+        } catch let error as CodexClientError {
+            precondition(error == .executableNotFound)
+            precondition(error.errorDescription == "Codex is not installed in a supported location.")
+        }
 
         let client = CodexAppServerClient(
             executableURL: URL(fileURLWithPath: CommandLine.arguments[0])
