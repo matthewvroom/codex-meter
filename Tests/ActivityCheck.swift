@@ -33,10 +33,14 @@ struct ActivityCheck {
             #"{"timestamp":"\#(formatter.string(from: now))","type":"event_msg","payload":{"type":"user_message","message":"secret"}}"#
         ].joined(separator: "\n") + "\n"
         let name = "rollout-2026-session-abc.jsonl"
-        try Data(records.utf8).write(to: active.appendingPathComponent(name))
-        try Data(records.utf8).write(to: archived.appendingPathComponent(name))
+        let activeLog = active.appendingPathComponent(name)
+        let archivedLog = archived.appendingPathComponent(name)
+        try Data(records.utf8).write(to: activeLog)
+        try Data(records.utf8).write(to: archivedLog)
 
-        let snapshot = try await LocalActivityScanner(roots: [root]).scan(days: 7)
+        let scanner = LocalActivityScanner(roots: [active, archived])
+        let snapshot = try await scanner.scan(days: 7)
+        precondition(snapshot.filesRead == 2)
         precondition(snapshot.days.count == 7)
         precondition(snapshot.total.inputTokens == 180)
         precondition(snapshot.total.cachedInputTokens == 55)
@@ -45,6 +49,34 @@ struct ActivityCheck {
         precondition(snapshot.models.count == 2)
         precondition(snapshot.models.first(where: { $0.model == "gpt-5.6-sol" })?.usage.totalTokens == 120)
         precondition(snapshot.models.first(where: { $0.model == "gpt-5.6-luna" })?.usage.totalTokens == 100)
+
+        let unchanged = try await scanner.scan(days: 7)
+        precondition(unchanged.filesRead == 0)
+        precondition(unchanged.total == snapshot.total)
+
+        let appended = try FileHandle(forWritingTo: activeLog)
+        try appended.seekToEnd()
+        try appended.write(contentsOf: Data((event(at: 0, input: 40, cached: 5, output: 10, total: 50) + "\n").utf8))
+        try appended.close()
+        let changed = try await scanner.scan(days: 7)
+        precondition(changed.filesRead == 1)
+        precondition(changed.total.totalTokens == 230)
+
+        try FileManager.default.removeItem(at: activeLog)
+        let removed = try await scanner.scan(days: 7)
+        precondition(removed.filesRead == 0)
+        precondition(removed.total == snapshot.total)
+
+        // Restore the original timestamp after replacing the file with equally sized contents.
+        let sameSizeReplacement = records.replacingOccurrences(of: "\"model\":\"gpt-5.6-luna\"", with: "\"model\":\"gpt-5.6-test\"")
+        precondition(sameSizeReplacement.utf8.count == records.utf8.count)
+        let archivedModifiedAt = try archivedLog.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate!
+        try Data(sameSizeReplacement.utf8).write(to: archivedLog, options: .atomic)
+        try FileManager.default.setAttributes([.modificationDate: archivedModifiedAt], ofItemAtPath: archivedLog.path)
+        let replaced = try await scanner.scan(days: 7)
+        precondition(replaced.filesRead == 1)
+        precondition(replaced.total == snapshot.total)
+        precondition(replaced.models.first(where: { $0.model == "gpt-5.6-test" })?.usage.totalTokens == 100)
 
         let rates = LocalCostRates(inputPerMillion: 2, cachedInputPerMillion: 0.5, outputPerMillion: 8)
         let expected = 125.0 / 1_000_000 * 2 + 55.0 / 1_000_000 * 0.5 + 40.0 / 1_000_000 * 8
@@ -92,6 +124,22 @@ struct ActivityCheck {
         precondition(truncated.total.outputTokens == 20)
         precondition(truncated.total.totalTokens == 120)
 
+        let overlapScanner = LocalActivityScanner(
+            roots: [active, archived],
+            largeFileThresholdBytes: 4_096,
+            largeFileTailBytes: 4_096
+        )
+        try Data(records.utf8).write(to: activeLog)
+        let paddedArchive = String(repeating: "discarded filler line\n", count: 300) + records
+        try Data(paddedArchive.utf8).write(to: archivedLog)
+        let overlap = try await overlapScanner.scan(days: 7)
+        precondition(overlap.summarizedLargeFiles == 1)
+        precondition(overlap.total == snapshot.total)
+        precondition(overlap.models == snapshot.models)
+        let cachedOverlap = try await overlapScanner.scan(days: 7)
+        precondition(cachedOverlap.filesRead == 0)
+        precondition(cachedOverlap.total == snapshot.total)
+
         let unknownRoot = root.appendingPathComponent("unknown", isDirectory: true)
         try FileManager.default.createDirectory(at: unknownRoot, withIntermediateDirectories: true)
         try Data((event(at: 0, input: 10, cached: 0, output: 2, total: 12) + "\n").utf8)
@@ -126,14 +174,21 @@ struct ActivityCheck {
 
         let invalidRoot = root.appendingPathComponent("invalid", isDirectory: true)
         try FileManager.default.createDirectory(at: invalidRoot, withIntermediateDirectories: true)
+        let invalidLog = invalidRoot.appendingPathComponent("rollout-invalid.jsonl")
+        try Data("ignored record\n".utf8).write(to: invalidRoot.appendingPathComponent("rollout-ignored.jsonl"))
         try Data(#"{"type":"token_count","private":"do not echo"}"#.utf8)
-            .write(to: invalidRoot.appendingPathComponent("rollout-invalid.jsonl"))
+            .write(to: invalidLog)
+        let retryingScanner = LocalActivityScanner(roots: [invalidRoot])
         do {
-            _ = try await LocalActivityScanner(roots: [invalidRoot]).scan(days: 7)
+            _ = try await retryingScanner.scan(days: 7)
             preconditionFailure("Unsupported records must fail visibly")
         } catch LocalActivityError.unsupportedRecords {
             // Expected: the source line is never included in the error.
         }
+        try Data(records.utf8).write(to: invalidLog)
+        let retried = try await retryingScanner.scan(days: 7)
+        precondition(retried.filesRead == 1)
+        precondition(retried.total == snapshot.total)
         print("Local activity checks passed")
     }
 }

@@ -314,14 +314,14 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    func refreshActivity(force: Bool = false) async {
-        guard !isActivityRefreshing else { return }
-        if !force, let sampledAt = activity?.sampledAt,
-           Date().timeIntervalSince(sampledAt) < 600 { return }
+    func refreshActivity() async {
+        guard !Task.isCancelled, !isActivityRefreshing else { return }
         isActivityRefreshing = true
         defer { isActivityRefreshing = false }
         do {
-            activity = try await scanActivityWithTimeout()
+            let snapshot = try await scanActivityWithTimeout()
+            try Task.checkCancellation()
+            activity = snapshot
             activityError = nil
             detectTokenMilestone(current: activity)
         } catch is CancellationError {
@@ -362,21 +362,24 @@ final class UsageStore: ObservableObject {
             sectionExpanded: localActivityExpanded,
             activityDisplaySelected: displayMode == .activity
         )
-        guard demand != currentActivityDemand else { return }
+        let previousTask = activityPollingTask
+        let demandChanged = demand.requiresRefresh != currentActivityDemand.requiresRefresh
+            || demand.requiresPolling != currentActivityDemand.requiresPolling
+        guard demandChanged || (demand.requiresRefresh && previousTask?.isCancelled == true) else { return }
         currentActivityDemand = demand
-        activityPollingTask?.cancel()
-        activityPollingTask = nil
-        if demand.requiresPolling {
-            activityPollingTask = Task {
+        previousTask?.cancel()
+        // Keep the canceled task until the next scan can wait for it to stop.
+        guard demand.requiresRefresh else { return }
+        activityPollingTask = Task {
+            await previousTask?.value
+            guard !Task.isCancelled else { return }
+            await refreshActivity()
+            guard demand.requiresPolling else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(600))
+                guard !Task.isCancelled else { return }
                 await refreshActivity()
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(600))
-                    guard !Task.isCancelled else { break }
-                    await refreshActivity()
-                }
             }
-        } else if demand.requiresRefresh {
-            activityPollingTask = Task { await refreshActivity() }
         }
     }
 

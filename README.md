@@ -9,15 +9,15 @@
 <p align="center">No extra account. No analytics. No Electron. Just one small native Mac app doing one useful job.</p>
 
 <p align="center">
-  <a href="https://github.com/TheJhyeFactor/codex-meter/releases/latest"><img src="https://img.shields.io/badge/macOS-13%2B-17181B?logo=apple" alt="macOS 13+"></a>
+  <a href="https://github.com/matthewvroom/codex-meter/releases/latest"><img src="https://img.shields.io/badge/macOS-13%2B-17181B?logo=apple" alt="macOS 13+"></a>
   <a href="https://www.swift.org/"><img src="https://img.shields.io/badge/Swift-6-17181B?logo=swift&logoColor=white" alt="Swift 6"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-17181B" alt="MIT License"></a>
-  <a href="https://github.com/TheJhyeFactor/codex-meter/releases/latest"><img src="https://img.shields.io/github/v/release/TheJhyeFactor/codex-meter?display_name=tag&sort=semver&color=087FF5" alt="Latest release"></a>
+  <a href="https://github.com/matthewvroom/codex-meter/releases/latest"><img src="https://img.shields.io/github/v/release/matthewvroom/codex-meter?display_name=tag&sort=semver&color=087FF5" alt="Latest release"></a>
 </p>
 
 Codex Meter is a free, open-source macOS menu bar app that shows how much Codex usage you have left, when it resets, which models used it, and what that activity would cost at standard API rates.
 
-I built this because I wanted one simple answer sitting in the menu bar: **how much Codex do I have left?** I did not want fake estimates, a web account, an Electron app or another service collecting usage data.
+Jhye built Codex Meter to answer one question from the menu bar: **how much Codex do I have left?** This fork adds weekly pace, a compact reset badge, and improvements to quota refresh and local activity.
 
 > Cost is always labelled as an **API-equivalent estimate**. It is not presented as your ChatGPT subscription bill.
 
@@ -73,13 +73,13 @@ Alert thresholds, menu-bar modes, history charts, cost rates and CLI automation 
 
 ## Download and install
 
-1. Download the latest `Codex-Meter-*.zip` from [GitHub Releases](https://github.com/TheJhyeFactor/codex-meter/releases/latest).
-2. Unzip it and move **Codex Meter.app** into `/Applications`.
+1. Download the latest `Codex-Meter-*.zip` from [this fork’s GitHub Releases](https://github.com/matthewvroom/codex-meter/releases/latest).
+2. Unzip it and move **Codex Meter.app** into `/Applications`. If you already use Codex Meter, quit it and replace the app in its current location.
 3. Open it once. The gauge and remaining percentage will appear in your menu bar.
 
 The ZIP also includes the optional `codex-meter` command-line tool and an installation note.
 
-The current community build is ad-hoc signed, not Apple-notarized. If macOS blocks the first launch, Control-click the app in Finder, choose **Open**, then confirm **Open** once. The normal double-click flow works after that.
+The community ZIP is ad-hoc signed. If macOS blocks the first launch, see [Apple’s guidance on opening downloaded apps](https://support.apple.com/en-us/102445).
 
 ### Requirements
 
@@ -139,7 +139,7 @@ The result includes each model's token total, share, pricing status and estimate
 You need the macOS Swift toolchain.
 
 ```sh
-git clone https://github.com/TheJhyeFactor/codex-meter.git
+git clone https://github.com/matthewvroom/codex-meter.git
 cd codex-meter
 SKIP_LIVE_CODEX_CHECK=1 ./scripts/test.sh
 ./scripts/build-app.sh
@@ -152,7 +152,7 @@ Run `./scripts/test.sh` without the environment variable when Codex is installed
 
 A usage meter should be easy to inspect and easy to trust. You can see exactly what Codex Meter runs, how it reads the percentage, what it stores, and what it does not touch.
 
-If you find a bug or have a practical improvement, [open an issue](https://github.com/TheJhyeFactor/codex-meter/issues) or read [CONTRIBUTING.md](CONTRIBUTING.md).
+For ways to contribute to this fork, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Widget status
 
@@ -168,6 +168,8 @@ MIT licensed. Free to use, modify, and share. See [LICENSE](LICENSE).
 
 ---
 
-Built and maintained by [Jhye / The Jhye Factor](https://github.com/TheJhyeFactor).
+Originally created by [Jhye / The Jhye Factor](https://github.com/TheJhyeFactor).
+
+Reimagined by Matthew Vroom. [Portfolio](https://matthewvroom.com/) · [GitHub](https://github.com/matthewvroom)
 
 > Codex Meter is an independent community project. It is not affiliated with, endorsed by, or sponsored by OpenAI. Codex and OpenAI are trademarks of their respective owners.

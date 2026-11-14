@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.10
+
+- This Mac activity reads new or changed logs and resumes from the last completed log when the popover reopens.
+- A truncated archived copy no longer removes usage recorded in a complete copy of the same session.
+- Updated download and first-launch instructions for this fork.
+- Added creator and contributor credits in Settings.
+
 ## 1.6.9
 
 - Discover the Codex CLI bundled in current ChatGPT.app builds without changing executable override precedence.

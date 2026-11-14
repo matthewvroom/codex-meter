@@ -1,8 +1,11 @@
 CODEX METER
 
 APP
-1. Move "Codex Meter.app" to /Applications.
-2. Control-click it and choose Open the first time if macOS asks.
+1. Quit any running copy of Codex Meter. Replace it in its current location,
+   or move "Codex Meter.app" to /Applications for a first install.
+2. Open Codex Meter once. The community ZIP is ad-hoc signed and macOS may
+   block it on first launch. See Apple's current first-launch guidance:
+   https://support.apple.com/en-us/102445
 
 CLI (OPTIONAL)
 Move "codex-meter" somewhere on your PATH, for example:

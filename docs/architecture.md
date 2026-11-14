@@ -21,9 +21,9 @@ The app intentionally does not consume rate-limit reset credits or expose conver
 
 ## This Mac activity
 
-The scanner discovers recent `.jsonl` files under `~/.codex/sessions` and `~/.codex/archived_sessions`. It uses local `/usr/bin/grep` prefiltering before strict decoding of only `turn_context` and `token_count` records. Candidate lines briefly enter process memory; only the latest bounded model ID, timestamps and numeric cumulative totals are retained. Each positive delta is attributed to the latest preceding model in physical record order. Per-rollout non-negative deltas ignore repeated counters, handle resets and deduplicate archived copies through stable rollout identity plus cumulative fingerprints.
+The scanner discovers recent `.jsonl` files under `~/.codex/sessions` and `~/.codex/archived_sessions`. It filters lines in process and decodes only `turn_context` and `token_count` records. Only bounded model IDs, timestamps and numeric cumulative totals are retained from the records. Each positive delta is attributed to the latest preceding model in physical record order. Per-rollout non-negative deltas ignore repeated counters, handle resets and deduplicate archived copies through stable rollout identity plus cumulative fingerprints.
 
-The first seven-day scan is bounded to recently modified logs. Results are cached in memory for at least ten minutes. Scans run when Local Activity is opened, when the user manually refreshes, or periodically while the activity-chart menu mode is selected; quota checks remain on a separate two-minute schedule. No helper daemon remains running between scans.
+The seven-day scan uses recently modified logs and reads only the recent tail of large files. Each completed file is cached in memory. Reopening the popover resumes work by reusing unchanged files and reading new or changed files. The file in progress when a scan is canceled is retried. Scans also run on manual refresh and every ten minutes in activity-chart menu mode. Quota checks run on a separate two-minute schedule.
 
 ## Cost estimates
 

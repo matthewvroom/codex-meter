@@ -61,7 +61,7 @@ public enum LocalActivityError: LocalizedError, Equatable {
         case .filterUnavailable: return "The local history filter could not be started."
         case .filterFailed: return "Local Codex session history could not be filtered."
         case .unsupportedRecords: return "Codex returned an unsupported local usage record format."
-        case .timedOut: return "This Mac activity scan took too long and was stopped. Try Refresh again after closing inactive Codex tasks."
+        case .timedOut: return "This Mac activity scan took too long. Select Refresh to continue from the last completed log."
         }
     }
 }
@@ -223,14 +223,35 @@ public actor LocalActivityScanner {
         let fingerprint: String
     }
 
-    private var cachedSignature: String?
-    private var cachedEvents: [Event] = []
+    private struct FileVersion: Equatable {
+        let size: Int
+        let modifiedAt: Date
+        let attributesModifiedAt: Date?
+        let identifier: NSObject?
+    }
+
+    private struct LogFile {
+        let url: URL
+        let version: FileVersion
+    }
+
+    private struct ParsedLog {
+        let version: FileVersion
+        var records: [CumulativeRecord] = []
+        var lastModel: String?
+        var hadCandidates = false
+        var decodedRecords = false
+    }
+
+    private var cachedLogs: [URL: ParsedLog] = [:]
     private let roots: [URL]
     private let calendar: Calendar
     private let largeFileThresholdBytes: Int
     private let largeFileTailBytes: Int
     private let fractionalISO = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
     private let standardISO = Date.ISO8601FormatStyle()
+    private let contextMarker = Data("\"type\":\"turn_context\"".utf8)
+    private let tokenMarker = Data("\"type\":\"token_count\"".utf8)
 
     public init(
         roots: [URL]? = nil,
@@ -257,31 +278,15 @@ public actor LocalActivityScanner {
         let startToday = calendar.startOfDay(for: now)
         let cutoff = calendar.date(byAdding: .day, value: -(days - 1), to: startToday) ?? startToday
         let candidates = try discoverFiles(modifiedSince: calendar.date(byAdding: .day, value: -1, to: cutoff) ?? cutoff)
-        let signature = candidates.compactMap { url -> String? in
-            guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
-                  let size = values.fileSize,
-                  let modifiedAt = values.contentModificationDate else { return nil }
-            return "\(url.path):\(size):\(modifiedAt.timeIntervalSince1970)"
-        }.joined(separator: "|")
-        let allEvents: [Event]
-        let summarizedLargeFiles: Int
-        if signature == cachedSignature {
-            allEvents = cachedEvents
-            summarizedLargeFiles = candidates.filter { url in
-                (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0 > largeFileThresholdBytes
-            }.count
-        } else {
-            let result = try await readEvents(from: candidates, cutoff: cutoff)
-            allEvents = result.events
-            summarizedLargeFiles = result.summarizedLargeFiles
-            cachedSignature = signature
-            cachedEvents = allEvents
-        }
+        let candidateURLs = Set(candidates.map(\.url))
+        cachedLogs = cachedLogs.filter { candidateURLs.contains($0.key) }
+        let result = try readEvents(from: candidates, cutoff: cutoff)
 
         var seen = Set<String>()
         var buckets: [Date: TokenUsage] = [:]
         var modelBuckets: [String: TokenUsage] = [:]
-        for event in allEvents where event.date >= cutoff && event.date <= now {
+        for event in result.events where event.date >= cutoff && event.date <= now {
+            try Task.checkCancellation()
             guard seen.insert(event.fingerprint).inserted else { continue }
             let day = calendar.startOfDay(for: event.date)
             buckets[day] = (buckets[day] ?? TokenUsage()) + event.usage
@@ -301,113 +306,98 @@ public actor LocalActivityScanner {
             days: output,
             models: modelOutput,
             sampledAt: now,
-            filesRead: candidates.count,
-            summarizedLargeFiles: summarizedLargeFiles
+            filesRead: result.filesRead,
+            summarizedLargeFiles: result.summarizedLargeFiles
         )
     }
 
-    private func discoverFiles(modifiedSince cutoff: Date) throws -> [URL] {
-        let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
-        var urls: [URL] = []
+    private func discoverFiles(modifiedSince cutoff: Date) throws -> [LogFile] {
+        let keys: Set<URLResourceKey> = [
+            .isRegularFileKey, .fileSizeKey, .contentModificationDateKey,
+            .attributeModificationDateKey, .fileResourceIdentifierKey
+        ]
+        var files: [LogFile] = []
         for root in roots {
+            try Task.checkCancellation()
             if FileManager.default.fileExists(atPath: root.path), !FileManager.default.isReadableFile(atPath: root.path) {
                 throw LocalActivityError.unreadableSource
             }
             guard let enumerator = FileManager.default.enumerator(
                 at: root,
-                includingPropertiesForKeys: keys,
+                includingPropertiesForKeys: Array(keys),
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) else { continue }
-            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-                guard let values = try? url.resourceValues(forKeys: Set(keys)),
+            var rootFiles: [LogFile] = []
+            for case let url as URL in enumerator {
+                try Task.checkCancellation()
+                guard url.pathExtension == "jsonl",
+                      let values = try? url.resourceValues(forKeys: keys),
                       values.isRegularFile == true,
-                      (values.contentModificationDate ?? .distantPast) >= cutoff else { continue }
-                urls.append(url)
+                      let size = values.fileSize,
+                      let modifiedAt = values.contentModificationDate,
+                      modifiedAt >= cutoff else { continue }
+                rootFiles.append(LogFile(url: url, version: FileVersion(
+                    size: size,
+                    modifiedAt: modifiedAt,
+                    attributesModifiedAt: values.attributeModificationDate,
+                    identifier: values.fileResourceIdentifier as? NSObject
+                )))
             }
+            files.append(contentsOf: rootFiles.sorted { $0.url.path < $1.url.path })
         }
-        return urls
+        return files
     }
 
-    private func readEvents(from urls: [URL], cutoff: Date) async throws -> (events: [Event], summarizedLargeFiles: Int) {
-        guard !urls.isEmpty else { return ([], 0) }
+    private func readEvents(from files: [LogFile], cutoff: Date) throws
+        -> (events: [Event], filesRead: Int, summarizedLargeFiles: Int) {
         var recordsBySession: [String: [CumulativeRecord]] = [:]
         var currentModelBySession: [String: String] = [:]
-        var partialSessions = Set<String>()
-        var matchesFound = 0
-        var decodedRecords = 0
-        let contextMarker = Data("\"type\":\"turn_context\"".utf8)
-        let tokenMarker = Data("\"type\":\"token_count\"".utf8)
-        let sizedURLs = urls.map { url in
-            (url, (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        }
-        let regularURLs = sizedURLs.filter { $0.1 <= largeFileThresholdBytes }.map(\.0)
-        let largeURLs = sizedURLs.filter { $0.1 > largeFileThresholdBytes }
+        var firstCompleteRecordDates: [String: Date] = [:]
+        var filesRead = 0
+        var hadCandidates = false
+        var decodedRecords = false
+        let regularFiles = files.filter { $0.version.size <= largeFileThresholdBytes }
+        let largeFiles = files.filter { $0.version.size > largeFileThresholdBytes }
 
-        func ingest(_ data: Data, sessionID: String) {
-            for rawLine in data.split(separator: 0x0A, omittingEmptySubsequences: true) where rawLine.count <= 5_000_000 {
-                matchesFound += 1
-                guard let record = decodeCandidate(Data(rawLine)) else { continue }
-                decodedRecords += 1
-                switch record {
-                case .model(let model):
-                    currentModelBySession[sessionID] = model
-                case .usage(let date, let total):
-                    recordsBySession[sessionID, default: []].append(
-                        CumulativeRecord(date: date, total: total, model: currentModelBySession[sessionID])
-                    )
+        for file in regularFiles + largeFiles {
+            try Task.checkCancellation()
+            let isLarge = file.version.size > largeFileThresholdBytes
+            let offset = isLarge ? max(0, file.version.size - largeFileTailBytes) : 0
+            let parsed: ParsedLog
+            if let cached = cachedLogs[file.url], cached.version == file.version {
+                parsed = cached
+            } else {
+                parsed = try parseLog(file, from: offset)
+                // Keep each completed log even if the rest of this scan is canceled.
+                cachedLogs[file.url] = parsed
+                filesRead += 1
+            }
+            hadCandidates = hadCandidates || parsed.hadCandidates
+            decodedRecords = decodedRecords || parsed.decodedRecords
+
+            let sessionID = file.url.deletingPathExtension().lastPathComponent
+            let isPartial = isLarge && (offset > 0 || (sessionStartDate(for: file.url).map { $0 < cutoff } ?? true))
+            if !isPartial, let earliest = parsed.records.min(by: { $0.date < $1.date })?.date {
+                firstCompleteRecordDates[sessionID] = min(firstCompleteRecordDates[sessionID] ?? earliest, earliest)
+            }
+            if !parsed.records.isEmpty {
+                if let previousModel = currentModelBySession[sessionID], parsed.records.first?.model == nil {
+                    recordsBySession[sessionID, default: []].append(contentsOf: parsed.records.map {
+                        CumulativeRecord(date: $0.date, total: $0.total, model: $0.model ?? previousModel)
+                    })
+                } else {
+                    recordsBySession[sessionID, default: []].append(contentsOf: parsed.records)
                 }
             }
+            if let model = parsed.lastModel {
+                currentModelBySession[sessionID] = model
+            }
         }
-
-        for url in regularURLs {
-            try Task.checkCancellation()
-            let handle: FileHandle
-            do {
-                handle = try FileHandle(forReadingFrom: url)
-            } catch {
-                throw LocalActivityError.unreadableSource
-            }
-            let data: Data
-            do {
-                data = try handle.readToEnd() ?? Data()
-                try handle.close()
-            } catch {
-                try? handle.close()
-                throw LocalActivityError.unreadableSource
-            }
-            try Task.checkCancellation()
-            let filtered = data.split(separator: 0x0A, omittingEmptySubsequences: true).filter { line in
-                line.range(of: contextMarker) != nil || line.range(of: tokenMarker) != nil
-            }
-            ingest(
-                Data(filtered.joined(separator: [0x0A])),
-                sessionID: url.deletingPathExtension().lastPathComponent
-            )
-        }
-
-        for (url, size) in largeURLs {
-            try Task.checkCancellation()
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            let offset = UInt64(max(0, size - largeFileTailBytes))
-            try handle.seek(toOffset: offset)
-            var data = try handle.readToEnd() ?? Data()
-            if offset > 0, let newline = data.firstIndex(of: 0x0A) {
-                data = Data(data[data.index(after: newline)...])
-            }
-            let sessionID = url.deletingPathExtension().lastPathComponent
-            if offset > 0 || sessionStartDate(for: url).map({ $0 < cutoff }) ?? true {
-                partialSessions.insert(sessionID)
-            }
-            let filtered = data.split(separator: 0x0A, omittingEmptySubsequences: true).filter { line in
-                line.range(of: contextMarker) != nil || line.range(of: tokenMarker) != nil
-            }
-            ingest(Data(filtered.joined(separator: [0x0A])), sessionID: sessionID)
-        }
-        if matchesFound > 0, decodedRecords == 0 { throw LocalActivityError.unsupportedRecords }
+        if hadCandidates, !decodedRecords { throw LocalActivityError.unsupportedRecords }
 
         var output: [Event] = []
         for (sessionID, records) in recordsBySession {
+            try Task.checkCancellation()
             var previous: TokenUsage?
             var generation = 0
             for record in records.sorted(by: { $0.date < $1.date }) {
@@ -421,7 +411,8 @@ public actor LocalActivityScanner {
                         delta = record.total
                     }
                 } else {
-                    if partialSessions.contains(sessionID) {
+                    // A truncated copy cannot invalidate the first record of a complete copy.
+                    if (firstCompleteRecordDates[sessionID] ?? .distantFuture) > record.date {
                         previous = record.total
                         continue
                     }
@@ -437,7 +428,57 @@ public actor LocalActivityScanner {
                 ))
             }
         }
-        return (output, largeURLs.count)
+        return (output, filesRead, largeFiles.count)
+    }
+
+    private func parseLog(_ file: LogFile, from offset: Int) throws -> ParsedLog {
+        let length = file.version.size - offset
+        var parsed = ParsedLog(version: file.version)
+        guard length > 0 else { return parsed }
+
+        let data: Data
+        do {
+            let handle = try FileHandle(forReadingFrom: file.url)
+            defer { try? handle.close() }
+            try handle.seek(toOffset: UInt64(offset))
+            data = try handle.read(upToCount: length) ?? Data()
+        } catch {
+            throw LocalActivityError.unreadableSource
+        }
+        // A log that grew during the read is picked up by its next version.
+        guard data.count == length else { throw LocalActivityError.unreadableSource }
+        try data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+            guard let base = bytes.baseAddress else { return }
+            var start = 0
+            var nextCancellationCheck = 0
+            while start < bytes.count {
+                if start >= nextCancellationCheck {
+                    try Task.checkCancellation()
+                    nextCancellationCheck = start + 256 * 1_024
+                }
+                let line = base.advanced(by: start)
+                let end = memchr(line, 0x0A, bytes.count - start).map {
+                    start + line.distance(to: UnsafeRawPointer($0))
+                } ?? bytes.count
+                defer { start = end + 1 }
+
+                // A tail may start inside a record. Drop that first line.
+                guard (offset == 0 || start > 0), end > start, end - start <= 5_000_000 else { continue }
+                let range = start..<end
+                guard data.range(of: contextMarker, in: range) != nil
+                        || data.range(of: tokenMarker, in: range) != nil else { continue }
+                parsed.hadCandidates = true
+                guard let record = decodeCandidate(data[range]) else { continue }
+                parsed.decodedRecords = true
+                switch record {
+                case .model(let model):
+                    parsed.lastModel = model
+                case .usage(let date, let total):
+                    parsed.records.append(CumulativeRecord(date: date, total: total, model: parsed.lastModel))
+                }
+            }
+        }
+        return parsed
     }
 
     private func sessionStartDate(for url: URL) -> Date? {

@@ -1,0 +1,31 @@
+#!/bin/zsh
+set -euo pipefail
+
+ROOT="${0:A:h:h}"
+OUTPUT="${1:-$ROOT/dist}"
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/Resources/Info.plist")"
+ARCHIVE="Codex-Meter-$VERSION.zip"
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+
+PAYLOAD="$STAGE/Codex Meter $VERSION"
+"$ROOT/scripts/build-app.sh" "$PAYLOAD"
+cp "$ROOT/Resources/INSTALL.txt" "$ROOT/LICENSE" "$PAYLOAD/"
+ditto -c -k --norsrc --noextattr --noqtn --noacl --keepParent "$PAYLOAD" "$STAGE/$ARCHIVE"
+
+mkdir "$STAGE/check"
+unzip -q "$STAGE/$ARCHIVE" -d "$STAGE/check"
+EXTRACTED="$STAGE/check/Codex Meter $VERSION"
+APP="$EXTRACTED/Codex Meter.app"
+for ARCH in arm64 x86_64; do
+  xcrun lipo -verify_arch "$ARCH" "$APP/Contents/MacOS/CodexMeter"
+  xcrun lipo -verify_arch "$ARCH" "$EXTRACTED/codex-meter"
+done
+codesign --verify --deep --strict "$APP"
+codesign --verify --strict "$EXTRACTED/codex-meter"
+cmp "$ROOT/LICENSE" "$EXTRACTED/LICENSE"
+"$EXTRACTED/codex-meter" --help >/dev/null
+
+mkdir -p "$OUTPUT"
+mv "$STAGE/$ARCHIVE" "$OUTPUT/$ARCHIVE"
+shasum -a 256 "$OUTPUT/$ARCHIVE"

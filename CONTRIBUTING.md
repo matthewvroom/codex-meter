@@ -13,7 +13,7 @@ Thanks for wanting to make Codex Meter better.
 You need macOS 13 or newer, Swift 6, and a working Codex installation.
 
 ```sh
-git clone https://github.com/TheJhyeFactor/codex-meter.git
+git clone https://github.com/matthewvroom/codex-meter.git
 cd codex-meter
 SKIP_LIVE_CODEX_CHECK=1 ./scripts/test.sh
 ./scripts/build-app.sh

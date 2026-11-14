@@ -16,32 +16,22 @@ jobs:
         run: |
           VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)
           test "v${VERSION}" = "$GITHUB_REF_NAME"
-      - name: Build universal app
-        run: ./scripts/build-app.sh dist
-      - name: Package app
-        run: |
-          mkdir "Codex Meter ${GITHUB_REF_NAME#v}"
-          ditto --norsrc --noextattr --noqtn --noacl \
-            "dist/Codex Meter.app" "Codex Meter ${GITHUB_REF_NAME#v}/Codex Meter.app"
-          cp "dist/codex-meter" "Codex Meter ${GITHUB_REF_NAME#v}/codex-meter"
-          cp Resources/INSTALL.txt "Codex Meter ${GITHUB_REF_NAME#v}/INSTALL.txt"
-          ditto -c -k --norsrc --noextattr --noqtn --noacl --keepParent \
-            "Codex Meter ${GITHUB_REF_NAME#v}" "Codex-Meter-${GITHUB_REF_NAME#v}.zip"
-      - name: Smoke-test release archive
-        run: |
-          mkdir release-check
-          unzip -q "Codex-Meter-${GITHUB_REF_NAME#v}.zip" -d release-check
-          ROOT="release-check/Codex Meter ${GITHUB_REF_NAME#v}"
-          lipo "$ROOT/Codex Meter.app/Contents/MacOS/CodexMeter" -verify_arch arm64 x86_64
-          lipo "$ROOT/codex-meter" -verify_arch arm64 x86_64
-          codesign --verify --deep --strict "$ROOT/Codex Meter.app"
-          codesign --verify --strict "$ROOT/codex-meter"
-          "$ROOT/codex-meter" --help
-      - name: Create GitHub release
+      - name: Run deterministic checks
+        env:
+          SKIP_LIVE_CODEX_CHECK: "1"
+        run: ./scripts/test.sh
+      - name: Build and verify release archive
+        run: zsh ./scripts/package-release.sh
+      - name: Create draft GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "A release already exists for $GITHUB_REF_NAME"
+            exit 0
+          fi
           gh release create "$GITHUB_REF_NAME" \
-            "Codex-Meter-${GITHUB_REF_NAME#v}.zip" \
+            "dist/Codex-Meter-${GITHUB_REF_NAME#v}.zip" \
+            --draft \
             --title "Codex Meter ${GITHUB_REF_NAME#v}" \
             --generate-notes

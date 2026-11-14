@@ -98,7 +98,7 @@ struct MeterView: View {
                 Button {
                     Task {
                         await store.refresh()
-                        await store.refreshActivity(force: true)
+                        await store.refreshActivity()
                     }
                 } label: {
                     if store.isRefreshing {
@@ -447,6 +447,21 @@ struct MeterView: View {
                     .foregroundStyle(.secondary)
             }
             .font(.system(size: 12))
+            Divider()
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 4) {
+                    Text("Originally created by")
+                    Link("Jhye / The Jhye Factor", destination: URL(string: "https://github.com/TheJhyeFactor")!)
+                }
+                Text("Reimagined by Matthew Vroom")
+                HStack(spacing: 8) {
+                    Link("Portfolio", destination: URL(string: "https://matthewvroom.com/")!)
+                    Link("GitHub", destination: URL(string: "https://github.com/matthewvroom")!)
+                }
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(16)
     }

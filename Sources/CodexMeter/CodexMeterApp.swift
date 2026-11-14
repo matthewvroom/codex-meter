@@ -118,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @objc private func refresh() {
         Task {
             await store.refresh()
-            await store.refreshActivity(force: true)
+            await store.refreshActivity()
         }
     }
     @objc private func quit() { NSApp.terminate(nil) }
