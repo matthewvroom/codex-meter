@@ -5,8 +5,9 @@ Codex Meter is designed so useful monitoring does not require another monitoring
 ## What the app reads
 
 - Current rate-limit data through the local, read-only Codex app-server interface.
+- Recent observed weekly reset dates and the latest weekly quota reading, saved in local preferences. When Codex supplies an account identifier, Meter uses it to keep reset history paired with the right account.
 - Model IDs from `turn_context` records and aggregate `token_count` events in recently modified files under `~/.codex/sessions` and `~/.codex/archived_sessions`.
-- Local preferences for alert thresholds, display mode, currency, custom fallback rates and launch at login.
+- Local preferences for alert thresholds, display mode and launch at login.
 - Account profile directories created under `~/.codex-meter/accounts`; Codex owns their credentials and Codex Meter never reads them.
 
 ## What the app deliberately ignores
@@ -15,7 +16,7 @@ Rollout logs can contain private prompts, responses, tool calls and file paths. 
 
 ## What leaves the Mac
 
-Codex Meter has no analytics, telemetry, advertising, account service or history upload. The quota request is handled by the installed Codex process using its existing session. Local history, model pricing and USD/AUD/EUR conversion do not make network calls.
+Codex Meter has no analytics, telemetry, advertising, account service or history upload. The quota request is handled by the installed Codex process using its existing session. The local history scan runs offline.
 
 When automatic update checks are enabled, the app makes up to two unauthenticated HTTPS requests per day to GitHub's public Releases API: one for the original project and one for Matthew's fork. These requests contain no Codex credentials, account information, prompts, responses, token history or usage totals. Automatic checks can be disabled in Settings. Codex Meter never downloads or installs an update without the user opening its GitHub release page.
 
@@ -27,6 +28,6 @@ Choosing **Meter + Codex** is an explicit authentication change. Codex Meter clo
 
 The banked-reset number is OpenAI's reported `availableCount`, not a local estimate. Codex Meter displays it but never calls the reset-credit consumption method.
 
-## Cost estimates
+## CLI cost estimates
 
-ChatGPT subscriptions are not billed as a simple per-token API invoice. Codex Meter therefore does not claim to show money spent. It applies a bundled, dated snapshot of official standard API prices entirely offline. Custom fallback rates for unknown models remain in local preferences. No local usage is sent to OpenAI's pricing pages.
+The CLI calculates API-equivalent estimates offline using a bundled, dated snapshot of official standard API prices. It accepts custom fallback rates for unknown models as command-line arguments.

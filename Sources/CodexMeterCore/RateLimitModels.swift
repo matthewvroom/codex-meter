@@ -33,10 +33,12 @@ public struct RateLimitWindow: Equatable, Sendable, Codable {
 
     public var remainingPercent: Int { max(0, min(100, 100 - usedPercent)) }
 
+    var isWeekly: Bool { (durationMinutes ?? 0) >= 9_000 }
+
     public var displayName: String {
         guard let durationMinutes else { return "Usage window" }
         if durationMinutes <= 360 { return "5-hour limit" }
-        if durationMinutes >= 9_000 { return "Weekly limit" }
+        if isWeekly { return "Weekly limit" }
         if durationMinutes >= 1_200 { return "Daily limit" }
         return "\(durationMinutes / 60)-hour limit"
     }
@@ -102,8 +104,8 @@ public struct WeeklyPace: Equatable, Sendable, Codable {
         window: RateLimitWindow,
         now: Date = Date()
     ) {
-        guard let durationMinutes = window.durationMinutes,
-              durationMinutes >= 9_000,
+        guard window.isWeekly,
+              let durationMinutes = window.durationMinutes,
               let resetsAt = window.resetsAt else { return nil }
 
         let duration = TimeInterval(durationMinutes * 60)
@@ -175,11 +177,18 @@ public struct RateLimitPayload: Equatable, Sendable, Codable {
     public let snapshot: RateLimitSnapshot
     public let fetchedAt: Date
     public let availableResetCredits: Int?
+    public let accountID: String?
 
-    public init(snapshot: RateLimitSnapshot, fetchedAt: Date, availableResetCredits: Int? = nil) {
+    public init(
+        snapshot: RateLimitSnapshot,
+        fetchedAt: Date,
+        availableResetCredits: Int? = nil,
+        accountID: String? = nil
+    ) {
         self.snapshot = snapshot
         self.fetchedAt = fetchedAt
         self.availableResetCredits = availableResetCredits
+        self.accountID = accountID
     }
 }
 
@@ -232,7 +241,8 @@ public enum RateLimitParser {
         return RateLimitPayload(
             snapshot: parseSnapshot(rawSnapshot),
             fetchedAt: now,
-            availableResetCredits: resetCredits.map { max(0, $0) }
+            availableResetCredits: resetCredits.map { max(0, $0) },
+            accountID: result["accountId"] as? String
         )
     }
 

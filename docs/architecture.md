@@ -25,15 +25,17 @@ The scanner discovers recent `.jsonl` files under `~/.codex/sessions` and `~/.co
 
 The seven-day scan uses recently modified logs and reads only the recent tail of large files. Each completed file is cached in memory. Reopening the popover resumes work by reusing unchanged files and reading new or changed files. The file in progress when a scan is canceled is retried. Scans also run on manual refresh and every ten minutes in activity-chart menu mode. Quota checks run on a separate two-minute schedule.
 
-## Cost estimates
+The chart overlays the active profile’s observed weekly quota resets at the end of the local day they occurred. Meter identifies a reset from successive Codex quota responses that show a new weekly window and lower usage. The history starts with the first successful reading and skips ambiguous changes.
+
+Milestone banners are local UI state triggered by token, low-usage and reset-credit transitions. Banked resets come directly from `rateLimitResetCredits.availableCount`. The UI shows the count as unavailable when that field is absent.
+
+## CLI cost estimates
 
 `OpenAIPriceCatalog` is a dated, inspectable snapshot of standard per-million-token prices from official OpenAI model pages. Matching is exact by model ID; unknown models remain visibly unpriced unless the user supplies fallback rates. There is no runtime pricing request or external dependency.
 
-`DisplayCurrency` converts the USD base estimate to USD, AUD or EUR using a dated ECB reference-rate snapshot. The selected app currency is a local preference; the CLI can optionally override the USD-to-selected-currency rate. No live FX request runs in the app.
+`DisplayCurrency` converts the USD base estimate to the currency passed to the CLI using a dated ECB reference-rate snapshot. The CLI accepts a USD-to-selected-currency rate override and performs conversion offline.
 
-The hypothetical model-price difference is intentionally an estimate: each known model's API-equivalent cost is compared with the same token usage priced as GPT-5.6 Sol. It appears only in the Estimates disclosure and is not presented as realized savings. Milestone banners are local-only UI state and are triggered at token, low-usage and reset-credit transitions. Banked resets come directly from `rateLimitResetCredits.availableCount`; the UI shows unavailable rather than inferring a value when that field is absent.
-
-Cached input is a subset of input, so estimates price non-cached input as `input - cached`, then apply model-specific input, cached-input and output rates. Reasoning output is not added again because it is contained in output totals. Aggregate logs cannot reliably reveal request-level pricing adjustments such as long context, so the UI always calls the result an API-equivalent estimate rather than a bill.
+Cached input is a subset of input, so estimates price uncached input as `input - cached`, then apply model-specific input, cached-input and output rates. Output totals include reasoning tokens. The CLI labels the result an API-equivalent estimate because aggregate logs omit request-level pricing adjustments such as long context.
 
 ## Distribution
 

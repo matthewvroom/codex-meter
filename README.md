@@ -4,7 +4,7 @@
 
 <h1 align="center">Codex Meter</h1>
 
-<p align="center"><strong>Your Codex limits, reset times, model usage and API-equivalent estimate—right in the macOS menu bar.</strong></p>
+<p align="center"><strong>Your Codex limits, reset times, weekly pace and activity in the macOS menu bar.</strong></p>
 
 <p align="center">No extra account. No analytics. No Electron. Just one small native Mac app doing one useful job.</p>
 
@@ -15,19 +15,17 @@
   <a href="https://github.com/matthewvroom/codex-meter/releases/latest"><img src="https://img.shields.io/github/v/release/matthewvroom/codex-meter?display_name=tag&sort=semver&color=087FF5" alt="Latest release"></a>
 </p>
 
-Codex Meter is a free, open-source macOS menu bar app that shows how much Codex usage you have left, when it resets, which models used it, and what that activity would cost at standard API rates.
+Codex Meter is a free, open-source macOS menu bar app that shows how much Codex usage you have left, when it resets, and which models you used on this Mac.
 
 Jhye built Codex Meter to answer one question from the menu bar: **how much Codex do I have left?** This fork adds weekly pace, a compact reset badge, and improvements to quota refresh and local activity.
 
-> Cost is always labelled as an **API-equivalent estimate**. It is not presented as your ChatGPT subscription bill.
-
 ## At a glance
 
-| Quota | Local insight | Cost | Automation |
-| --- | --- | --- | --- |
-| Remaining percentage | Seven-day This Mac chart | Official per-model rates | Universal CLI |
-| Exact reset time | Model-by-model usage | USD, AUD or EUR | JSON output |
-| Honest stale/error state | Prompts stay ignored | Unknown models stay unpriced | Threshold exit codes |
+| Quota | Local insight | Automation |
+| --- | --- | --- |
+| Remaining percentage | Seven-day This Mac chart | Universal CLI |
+| Exact reset time | Model-by-model usage | JSON output |
+| Stale and error states | Prompt text stays private | Threshold exit codes |
 
 ## Why Codex Meter is different
 
@@ -45,7 +43,7 @@ No Electron runtime, background helper daemon, analytics SDK or external databas
 
 ### Power without a privacy trade-off
 
-Alert thresholds, menu-bar modes, history charts, cost rates and CLI automation stay on your Mac. No separate API key or external dependency is required.
+Alert thresholds, menu-bar modes, history charts and CLI automation stay on your Mac. No separate API key or external dependency is required.
 
 ## Features
 
@@ -56,9 +54,8 @@ Alert thresholds, menu-bar modes, history charts, cost rates and CLI automation 
 - Warns once when remaining usage crosses below 10%, 20%, or 30%, then waits for recovery or a new reset window.
 - Detects stale or unavailable data instead of leaving a misleading old number visible.
 - Builds a seven-day This Mac activity chart from aggregate events in Codex session logs on this machine.
+- Marks observed weekly quota resets at the end of the day they occurred.
 - Breaks this Mac's recorded usage down by the actual model recorded for each Codex turn.
-- Automatically calculates an API-equivalent estimate with bundled official OpenAI standard prices.
-- Displays estimates in USD, AUD or EUR with a dated local ECB reference-rate snapshot.
 - Adds accounts through OpenAI's secure browser login, then hot-swaps profiles from the account menu beside refresh.
 - Asks whether each profile change should affect Meter only or Meter plus the Codex desktop app.
 - For a desktop swap, signs Codex out through the official app-server method, completes OpenAI's browser login, verifies the account and relaunches Codex.

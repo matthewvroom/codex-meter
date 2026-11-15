@@ -52,6 +52,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var activity: LocalActivitySnapshot?
     @Published private(set) var activityError: String?
     @Published private(set) var isActivityRefreshing = false
+    @Published private var weeklyResetHistory: [UUID: WeeklyResetHistory] = [:]
     @Published var alertThreshold: Int {
         didSet { UserDefaults.standard.set(alertThreshold, forKey: Self.thresholdKey) }
     }
@@ -61,12 +62,6 @@ final class UsageStore: ObservableObject {
             UserDefaults.standard.set(displayMode.rawValue, forKey: Self.displayModeKey)
             updateActivityDemand()
         }
-    }
-    @Published var inputRate: Double { didSet { persistRates() } }
-    @Published var cachedInputRate: Double { didSet { persistRates() } }
-    @Published var outputRate: Double { didSet { persistRates() } }
-    @Published var currency: DisplayCurrency {
-        didSet { UserDefaults.standard.set(currency.rawValue, forKey: Self.currencyKey) }
     }
     @Published var selectedUpdateChannel: UpdateChannel {
         didSet { UserDefaults.standard.set(selectedUpdateChannel.rawValue, forKey: Self.updateChannelKey) }
@@ -105,10 +100,6 @@ final class UsageStore: ObservableObject {
     private static let thresholdKey = "alertThreshold"
     private static let lowUsageAlertStateKey = "lowUsageAlertState"
     private static let displayModeKey = "menuBarDisplayMode"
-    private static let inputRateKey = "costInputRate"
-    private static let cachedInputRateKey = "costCachedInputRate"
-    private static let outputRateKey = "costOutputRate"
-    private static let currencyKey = "displayCurrency"
     private static let accountsKey = "accountProfiles"
     private static let activeAccountKey = "activeAccountID"
     private static let updateChannelKey = "updateChannel"
@@ -117,6 +108,7 @@ final class UsageStore: ObservableObject {
     private static let lastNotifiedUpdateKey = "lastNotifiedUpdate"
     private static let tokenMilestoneKey = "lastTokenMilestone"
     private static let resetMilestoneKey = "lastBankedReset"
+    private static let weeklyResetHistoryKey = "weeklyResetHistory"
 
     init(previewMode: Bool = false) {
         let defaultAccount = AccountProfile(id: Self.defaultAccountID, name: "Default", homePath: nil, email: nil)
@@ -141,15 +133,18 @@ final class UsageStore: ObservableObject {
         self.accounts = loadedAccounts
         self.activeAccountID = chosenAccountID
         self.client = CodexAppServerClient(codexHome: loadedAccounts.first(where: { $0.id == chosenAccountID })?.homeURL)
-        UserDefaults.standard.set(try? JSONEncoder().encode(loadedAccounts), forKey: Self.accountsKey)
-        UserDefaults.standard.set(chosenAccountID.uuidString, forKey: Self.activeAccountKey)
+        if !previewMode {
+            UserDefaults.standard.set(try? JSONEncoder().encode(loadedAccounts), forKey: Self.accountsKey)
+            UserDefaults.standard.set(chosenAccountID.uuidString, forKey: Self.activeAccountKey)
+            if let data = UserDefaults.standard.data(forKey: Self.weeklyResetHistoryKey),
+               let histories = try? JSONDecoder().decode([UUID: WeeklyResetHistory].self, from: data) {
+                let savedIDs = Set(loadedAccounts.map(\.id))
+                weeklyResetHistory = histories.filter { savedIDs.contains($0.key) }
+            }
+        }
         let saved = UserDefaults.standard.integer(forKey: Self.thresholdKey)
         alertThreshold = saved == 0 ? 20 : saved
         displayMode = MenuBarDisplayMode(rawValue: UserDefaults.standard.string(forKey: Self.displayModeKey) ?? "") ?? .resetPercentageAndPace
-        inputRate = UserDefaults.standard.double(forKey: Self.inputRateKey)
-        cachedInputRate = UserDefaults.standard.double(forKey: Self.cachedInputRateKey)
-        outputRate = UserDefaults.standard.double(forKey: Self.outputRateKey)
-        currency = DisplayCurrency(rawValue: UserDefaults.standard.string(forKey: Self.currencyKey) ?? "") ?? .usd
         selectedUpdateChannel = UpdateChannel(rawValue: UserDefaults.standard.string(forKey: Self.updateChannelKey) ?? "") ?? .matthewFork
         automaticallyChecksForUpdates = UserDefaults.standard.object(forKey: Self.automaticUpdateChecksKey) as? Bool ?? true
         if let data = UserDefaults.standard.data(forKey: Self.lowUsageAlertStateKey),
@@ -162,12 +157,12 @@ final class UsageStore: ObservableObject {
                 snapshot: RateLimitSnapshot(
                     limitID: "codex",
                     limitName: "Codex",
-                    planType: "plus",
-                    primary: RateLimitWindow(usedPercent: 58, resetsAt: now.addingTimeInterval(8_040), durationMinutes: 300),
-                    secondary: RateLimitWindow(usedPercent: 32, resetsAt: now.addingTimeInterval(403_200), durationMinutes: 10_080)
+                    planType: "pro",
+                    primary: RateLimitWindow(usedPercent: 40, resetsAt: now.addingTimeInterval(403_200), durationMinutes: 10_080),
+                    secondary: nil
                 ),
                 fetchedAt: now,
-                availableResetCredits: 3
+                availableResetCredits: 1
             )
             let previewTokens: [Int64] = [8_000_000, 0, 5_000, 3_000_000, 0, 0, 9_000_000]
             activity = LocalActivitySnapshot(
@@ -211,19 +206,17 @@ final class UsageStore: ObservableObject {
     }
 
     var windows: [RateLimitWindow] { payload?.snapshot.windows ?? [] }
+    var weeklyResetDates: [Date] {
+        if previewMode, let sampledAt = activity?.sampledAt,
+           let sampleDate = Calendar.current.date(byAdding: .day, value: -3, to: sampledAt) {
+            return [sampleDate]
+        }
+        guard !windows.isEmpty else { return [] }
+        return weeklyResetHistory[activeAccountID]?.resetDates ?? []
+    }
     var activeAccountName: String { accounts.first(where: { $0.id == activeAccountID })?.name ?? "Default" }
     var activeAccountDisplayName: String { accounts.first(where: { $0.id == activeAccountID })?.displayName ?? "Default" }
-    var canDeleteActiveAccount: Bool { accounts.first(where: { $0.id == activeAccountID })?.homePath != nil }
     var bankedResetCount: Int? { payload?.availableResetCredits }
-    var totalSavingsUSD: Double {
-        guard let activity else { return 0 }
-        guard let baseline = OpenAIPriceCatalog.price(for: "gpt-5.6-sol") else { return 0 }
-        return activity.models.reduce(0) { total, item in
-            guard let actual = OpenAIPriceCatalog.price(for: item.model) else { return total }
-            return total + max(0, baseline.estimate(item.usage) - actual.estimate(item.usage))
-        }
-    }
-    var totalSavings: Double { currency.convertFromUSD(totalSavingsUSD) }
     var menuBarRemaining: Int? {
         menuBarWindow?.remainingPercent
     }
@@ -232,9 +225,6 @@ final class UsageStore: ObservableObject {
     }
     var planLabel: String? {
         payload?.snapshot.planType?.replacingOccurrences(of: "_", with: " ").capitalized
-    }
-    var costRates: LocalCostRates {
-        LocalCostRates(inputPerMillion: inputRate, cachedInputPerMillion: cachedInputRate, outputPerMillion: outputRate)
     }
     var isStale: Bool {
         guard let fetchedAt = payload?.fetchedAt else { return false }
@@ -385,24 +375,42 @@ final class UsageStore: ObservableObject {
 
     func refresh() async {
         guard !isRefreshing else { return }
+        let refreshedProfile = activeAccountID
+        let refreshedClient = client
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            let newPayload = try await client.readRateLimits()
+            let newPayload = try await refreshedClient.readRateLimits()
+            guard client === refreshedClient, activeAccountID == refreshedProfile else { return }
             let previous = payload
             payload = newPayload
             errorMessage = newPayload.snapshot.windows.isEmpty ? "No Codex rate-limit windows were returned for this account." : nil
             if errorMessage == nil {
                 lastUsageDiagnostics = nil
                 accountErrorMessage = nil
+                if !previewMode {
+                    var history = weeklyResetHistory[refreshedProfile] ?? WeeklyResetHistory()
+                    history.observe(newPayload)
+                    if history != weeklyResetHistory[refreshedProfile] {
+                        weeklyResetHistory[refreshedProfile] = history
+                        persistWeeklyResetHistory()
+                    }
+                }
             }
             await notifyIfNeeded(newPayload)
+            guard client === refreshedClient, activeAccountID == refreshedProfile else { return }
             detectBankedResetMilestone(previous: previous, current: newPayload)
         } catch {
+            let diagnostics = await refreshedClient.diagnosticSummary()
+            guard client === refreshedClient, activeAccountID == refreshedProfile else { return }
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            lastUsageDiagnostics = await client.diagnosticSummary()
-            await client.stop()
+            lastUsageDiagnostics = diagnostics
+            await refreshedClient.stop()
         }
+    }
+
+    private func persistWeeklyResetHistory() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(weeklyResetHistory), forKey: Self.weeklyResetHistoryKey)
     }
 
     func copyUsageDiagnostics() {
@@ -506,10 +514,6 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    func deleteActiveAccount() {
-        deleteAccount(id: activeAccountID)
-    }
-
     func deleteAccount(id: UUID) {
         guard let profile = accounts.first(where: { $0.id == id }), let home = profile.homeURL else { return }
         let wasActive = profile.id == activeAccountID
@@ -531,6 +535,8 @@ final class UsageStore: ObservableObject {
                 loginTasks.removeValue(forKey: profile.id)?.cancel()
                 try AccountProfileStorage.removeLocalProfile(at: home)
                 accounts.removeAll { $0.id == profile.id }
+                weeklyResetHistory.removeValue(forKey: profile.id)
+                persistWeeklyResetHistory()
                 persistAccounts()
                 if wasActive, let fallback = accounts.first {
                     activeAccountID = fallback.id
@@ -664,11 +670,6 @@ final class UsageStore: ObservableObject {
         try? await center.add(UNNotificationRequest(identifier: "codex-meter-low-\(resetID)", content: content, trigger: nil))
     }
 
-    private func persistRates() {
-        UserDefaults.standard.set(max(0, inputRate), forKey: Self.inputRateKey)
-        UserDefaults.standard.set(max(0, cachedInputRate), forKey: Self.cachedInputRateKey)
-        UserDefaults.standard.set(max(0, outputRate), forKey: Self.outputRateKey)
-    }
 }
 
 private func decodedDefaultID(from data: Data?) -> UUID? {

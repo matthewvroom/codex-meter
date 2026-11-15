@@ -2,6 +2,8 @@
 
 ## 1.6.10
 
+- Shows banked reset availability above the quota and marks observed weekly resets on the seven-day activity chart.
+- Moves model totals and sample time into Activity Details, simplifies inline Settings, and keeps API-equivalent cost estimates in the CLI.
 - This Mac activity reads new or changed logs and resumes from the last completed log when the popover reopens.
 - A truncated archived copy no longer removes usage recorded in a complete copy of the same session.
 - Updated download and first-launch instructions for this fork.

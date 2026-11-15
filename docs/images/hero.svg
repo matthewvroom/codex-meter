@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
   <title id="title">Codex Meter for macOS</title>
-  <desc id="desc">A dark native macOS menu bar app showing Codex quota, model usage and local API-equivalent cost estimates.</desc>
+  <desc id="desc">A dark native macOS menu bar app showing Codex quota, daily token activity and model usage.</desc>
   <rect width="1200" height="560" fill="#0d0e10"/>
   <path d="M0 494H1200" stroke="#26282d"/>
   <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
@@ -43,14 +43,12 @@
       <text x="213" y="298">SU</text><text x="267" y="298">M</text><text x="321" y="298">TU</text><text x="375" y="298">W</text>
     </g>
     <g font-size="10">
-      <text x="24" y="330" fill="#d9dbe0" font-weight="600">gpt-5.6-sol</text><text x="253" y="330" fill="#8d9097">59% · 470.8M</text><text x="372" y="330" fill="#d9dbe0">US$324.63</text>
-      <text x="24" y="353" fill="#d9dbe0" font-weight="600">gpt-5.6-luna</text><text x="253" y="353" fill="#8d9097">37% · 294.6M</text><text x="378" y="353" fill="#d9dbe0">US$46.80</text>
-      <text x="24" y="376" fill="#d9dbe0" font-weight="600">gpt-5.6-terra</text><text x="253" y="376" fill="#8d9097">5% · 38.2M</text><text x="378" y="376" fill="#d9dbe0">US$16.02</text>
+      <text x="24" y="330" fill="#d9dbe0" font-weight="600">gpt-5.6-sol</text><text x="414" y="330" fill="#8d9097" text-anchor="end">59% · 470.8M</text>
+      <text x="24" y="353" fill="#d9dbe0" font-weight="600">gpt-5.6-luna</text><text x="414" y="353" fill="#8d9097" text-anchor="end">37% · 294.6M</text>
+      <text x="24" y="376" fill="#d9dbe0" font-weight="600">gpt-5.6-terra</text><text x="414" y="376" fill="#8d9097" text-anchor="end">5% · 38.2M</text>
     </g>
     <path d="M24 398H414" stroke="#2b2d32"/>
     <text x="24" y="425" fill="#8d9097" font-size="10">Today 308.3M</text>
-    <text x="264" y="425" fill="#d9dbe0" font-size="10">API-equivalent ≈ US$387.46</text>
-    <text x="24" y="449" fill="#686b72" font-size="9">Official prices · local model attribution · estimate only</text>
   </g>
   <text x="72" y="522" fill="#5f6269" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">THE JHYE FACTOR · INDEPENDENT COMMUNITY PROJECT</text>
 </svg>

@@ -4,11 +4,13 @@ import CodexMeterCore
 import SwiftUI
 
 @main
-struct CodexMeterApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-
-    var body: some Scene {
-        Settings { EmptyView() }
+struct CodexMeterApp {
+    @MainActor
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        withExtendedLifetime(delegate) { app.run() }
     }
 }
 
@@ -73,10 +75,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         Publishers.CombineLatest4(store.$payload, store.$errorMessage, store.$displayMode, store.$activity)
             .receive(on: RunLoop.main)
             .sink { [weak self] _, _, _, _ in self?.updateStatusItem() }
-            .store(in: &cancellables)
-        store.$currency
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.updateStatusItem() }
             .store(in: &cancellables)
         updateStatusItem()
     }

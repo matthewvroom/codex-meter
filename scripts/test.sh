@@ -19,6 +19,13 @@ swiftc \
 
 swiftc \
   "$ROOT/Sources/CodexMeterCore/RateLimitModels.swift" \
+  "$ROOT/Sources/CodexMeterCore/WeeklyResetHistory.swift" \
+  "$ROOT/Tests/WeeklyResetHistoryCheck.swift" \
+  -o "$TMP/weekly-reset-history-check"
+"$TMP/weekly-reset-history-check"
+
+swiftc \
+  "$ROOT/Sources/CodexMeterCore/RateLimitModels.swift" \
   "$ROOT/Tests/LowUsageAlertCheck.swift" \
   -o "$TMP/low-usage-alert-check"
 "$TMP/low-usage-alert-check"

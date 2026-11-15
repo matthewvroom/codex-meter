@@ -6,7 +6,6 @@ struct MeterView: View {
     @ObservedObject var store: UsageStore
     let onPreferredSizeChange: (NSSize) -> Void
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("usageWindowsExpanded") private var usageWindowsExpanded = true
     @AppStorage("localActivityExpanded") private var localActivityExpanded = true
     @AppStorage("settingsExpanded") private var settingsExpanded = false
     @State private var panelContentHeight: CGFloat = 1
@@ -174,13 +173,7 @@ struct MeterView: View {
     @ViewBuilder
     private var content: some View {
         VStack(spacing: 0) {
-            DisclosureGroup(isExpanded: $usageWindowsExpanded) {
-                quotaContent
-            } label: {
-                SectionLabel(title: "Usage windows", detail: store.activeAccountName)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            quotaContent
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -189,8 +182,7 @@ struct MeterView: View {
             if let activity = store.activity {
                 Divider()
                 DisclosureGroup(isExpanded: $localActivityExpanded) {
-                    ThisMacActivityView(activity: activity, currency: store.currency, totalSavings: store.totalSavings)
-                        .padding(.horizontal, -16)
+                    ThisMacActivityView(activity: activity, weeklyResetDates: store.weeklyResetDates)
                 } label: {
                     SectionLabel(title: "This Mac activity", detail: "\(compactTokens(activity.total.totalTokens)) tokens")
                 }
@@ -269,26 +261,18 @@ struct MeterView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 148)
         } else if store.windows.isEmpty {
-            EmptyState(message: store.errorMessage ?? "Usage data is unavailable.", retry: {
-                Task { await store.refresh() }
-            }, copyDiagnostics: store.copyUsageDiagnostics)
+            VStack(spacing: 0) {
+                if store.bankedResetCount != nil {
+                    bankedResetsRow
+                    Divider().padding(.leading, 16)
+                }
+                EmptyState(message: store.errorMessage ?? "Usage data is unavailable.", retry: {
+                    Task { await store.refresh() }
+                }, copyDiagnostics: store.copyUsageDiagnostics)
+            }
         } else {
             VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.counterclockwise.circle")
-                        .foregroundStyle(Color.accentColor)
-                    Text("Banked resets")
-                        .font(.system(size: 10, weight: .medium))
-                    Spacer()
-                    Text(store.bankedResetCount.map(String.init) ?? "—")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 9)
-                .help(store.bankedResetCount == nil
-                    ? "OpenAI did not return a banked reset count for this account"
-                    : "Reset credits currently available for this account")
+                bankedResetsRow
                 Divider().padding(.leading, 16)
                 ForEach(Array(store.windows.enumerated()), id: \.offset) { index, window in
                     UsageRow(window: window, now: store.payload?.fetchedAt ?? Date())
@@ -312,11 +296,46 @@ struct MeterView: View {
         }
     }
 
+    private var bankedResetsRow: some View {
+        let count = store.bankedResetCount
+        return HStack(spacing: 8) {
+            Image(systemName: "arrow.counterclockwise.circle")
+                .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)
+            Text("Banked resets")
+                .font(.system(size: 11, weight: .medium))
+            Spacer()
+            if let count {
+                Text("\(count) available")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+            } else {
+                Text("Unavailable")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+        .help(count == nil
+            ? "OpenAI did not return a banked reset count for this account"
+            : "Manual reset credits for this account")
+    }
+
     private var settings: some View {
         DisclosureGroup(isExpanded: $settingsExpanded) {
             footer
         } label: {
-            SectionLabel(title: "Settings", detail: "Display, alerts and accounts")
+            HStack {
+                Text("Settings").font(.system(size: 12, weight: .medium))
+                Spacer()
+                if store.accountErrorMessage != nil {
+                    Text("Account needs attention")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                }
+            }
         }
         .padding(16)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -327,35 +346,13 @@ struct MeterView: View {
     }
 
     private var footer: some View {
-        VStack(spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Active account")
-                        .font(.system(size: 12))
-                    Text(store.activeAccountDisplayName)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button("Add…") { store.addAccount() }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Color.accentColor)
-                Button("Delete…") { store.deleteActiveAccount() }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(store.canDeleteActiveAccount ? Color.red : Color.secondary)
-                    .disabled(!store.canDeleteActiveAccount)
-            }
+        VStack(alignment: .leading, spacing: 10) {
             if let accountError = store.accountErrorMessage {
                 Text(accountError)
                     .font(.system(size: 10))
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Profiles change only the usage account shown in Codex Meter.")
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
             HStack {
                 Text("Menu bar")
                     .font(.system(size: 12))
@@ -368,18 +365,6 @@ struct MeterView: View {
                 .labelsHidden()
                 .font(.system(size: 10))
                 .frame(width: 210)
-            }
-            HStack {
-                Text("Currency")
-                    .font(.system(size: 12))
-                Spacer()
-                Picker("Currency", selection: $store.currency) {
-                    ForEach(DisplayCurrency.allCases) { currency in
-                        Text(currency.code).tag(currency)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 72)
             }
             HStack {
                 Text("Low-usage alert")
@@ -399,44 +384,8 @@ struct MeterView: View {
             ))
             .font(.system(size: 12))
             Divider()
-            HStack {
-                Text("Update source")
-                    .font(.system(size: 12))
-                Spacer()
-                Picker("Update source", selection: $store.selectedUpdateChannel) {
-                    ForEach(UpdateChannel.allCases) { channel in
-                        Text(channel.displayName).tag(channel)
-                    }
-                }
-                .labelsHidden()
-                .font(.system(size: 10))
-                .frame(width: 154)
-            }
-            Toggle("Automatically check daily", isOn: $store.automaticallyChecksForUpdates)
-                .font(.system(size: 12))
-            VStack(spacing: 7) {
-                ForEach(UpdateChannel.allCases) { channel in
-                    updateChannelRow(channel)
-                }
-            }
-            if store.selectedUpdateChannel == .original {
-                Text("The original project may not include features that are available only in Matthew's fork.")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            HStack {
-                Text("Installed \(store.currentAppVersion)")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button(store.isCheckingForUpdates ? "Checking…" : "Check Now") {
-                    Task { await store.checkForUpdates() }
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-                .disabled(store.isCheckingForUpdates)
-            }
+            updates
+            Divider()
             HStack {
                 Button("Open Codex") { store.openCodex() }
                     .buttonStyle(.plain)
@@ -447,7 +396,64 @@ struct MeterView: View {
                     .foregroundStyle(.secondary)
             }
             .font(.system(size: 12))
-            Divider()
+            about
+        }
+        .padding(.top, 10)
+    }
+
+    private var updates: some View {
+        let channel = store.selectedUpdateChannel
+        let result = store.updateResult(for: channel)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Updates")
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Text("Installed \(store.currentAppVersion)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                if store.isCheckingForUpdates {
+                    Text("Checking…").foregroundStyle(.secondary)
+                } else if let release = result?.release, release.isNewer(than: store.currentAppVersion) {
+                    Button("View \(release.version) release") { store.openRelease(for: channel) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.accentColor)
+                } else if let error = result?.errorMessage {
+                    Text("Update check failed")
+                        .foregroundStyle(.orange)
+                        .help(error)
+                } else {
+                    Text(result == nil ? "Not checked" : "Up to date")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Check for Updates") { Task { await store.checkForUpdates() } }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .disabled(store.isCheckingForUpdates)
+            }
+            .font(.system(size: 11))
+
+            Toggle("Check for updates automatically", isOn: $store.automaticallyChecksForUpdates)
+                .font(.system(size: 12))
+
+            DisclosureGroup("Advanced") {
+                Picker("Update source", selection: $store.selectedUpdateChannel) {
+                    ForEach(UpdateChannel.allCases) { channel in
+                        Text(channel.displayName).tag(channel)
+                    }
+                }
+                .padding(.top, 6)
+            }
+            .font(.system(size: 11))
+        }
+    }
+
+    private var about: some View {
+        DisclosureGroup("About Codex Meter") {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 4) {
                     Text("Originally created by")
@@ -462,52 +468,9 @@ struct MeterView: View {
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 6)
         }
-        .padding(16)
-    }
-
-    private func updateChannelRow(_ channel: UpdateChannel) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: store.selectedUpdateChannel == channel ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(store.selectedUpdateChannel == channel ? Color.accentColor : Color.secondary)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(channel.displayName)
-                    .font(.system(size: 10, weight: .medium))
-                Text("\(channel.owner)/\(channel.repository)")
-                    .font(.system(size: 8))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if let result = store.updateResult(for: channel), let release = result.release {
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text("v\(release.version)")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .monospacedDigit()
-                    if release.isNewer(than: store.currentAppVersion) {
-                        Text(channel == store.selectedUpdateChannel ? "Update available" : "Newer release")
-                            .font(.system(size: 8, weight: .medium))
-                            .foregroundStyle(channel == store.selectedUpdateChannel ? Color.accentColor : Color.orange)
-                    }
-                }
-                Button { store.openRelease(for: channel) } label: {
-                    Image(systemName: "arrow.up.right.square")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-                .help("View \(channel.displayName) release")
-            } else if let result = store.updateResult(for: channel), result.errorMessage != nil {
-                Button("Unavailable") { store.openRelease(for: channel) }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                    .help(result.errorMessage ?? "Release information is unavailable")
-            } else {
-                Text("Not checked")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .accessibilityElement(children: .combine)
+        .font(.system(size: 11))
     }
 
     private var headerSubtitle: String {
@@ -523,12 +486,13 @@ struct MeterView: View {
         return String(localized.prefix(while: { !$0.isWhitespace }))
     }
 
-    private func compactTokens(_ value: Int64) -> String {
-        if value >= 1_000_000_000 { return String(format: "%.1fB", Double(value) / 1_000_000_000) }
-        if value >= 1_000_000 { return String(format: "%.1fM", Double(value) / 1_000_000) }
-        if value >= 1_000 { return String(format: "%.1fK", Double(value) / 1_000) }
-        return "\(value)"
-    }
+}
+
+private func compactTokens(_ value: Int64) -> String {
+    if value >= 1_000_000_000 { return String(format: "%.1fB", Double(value) / 1_000_000_000) }
+    if value >= 1_000_000 { return String(format: "%.1fM", Double(value) / 1_000_000) }
+    if value >= 1_000 { return String(format: "%.1fK", Double(value) / 1_000) }
+    return "\(value)"
 }
 
 private struct PanelHeightKey: PreferenceKey {
@@ -586,51 +550,60 @@ private struct CelebrationBanner: View {
 
 private struct ThisMacActivityView: View {
     let activity: LocalActivitySnapshot
-    let currency: DisplayCurrency
-    let totalSavings: Double
-    @AppStorage("localActivityModelsExpanded") private var modelsExpanded = false
-    @AppStorage("localActivityEstimatesExpanded") private var estimatesExpanded = false
+    let weeklyResetDates: [Date]
+    @AppStorage("localActivityDetailsExpanded") private var detailsExpanded = false
+    @State private var showsAllModels = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("This Mac activity")
-                        .font(.system(size: 12, weight: .medium))
-                    Text("Seven days · recorded in Codex session logs on this Mac")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(compactTokens(activity.total.totalTokens))
-                        .font(.system(size: 17, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                    Text("tokens")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Last seven days")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+
+            if let firstDay = activity.days.first?.date,
+               let lastDay = activity.days.last?.date,
+               let dayAfterLast = Calendar.current.date(byAdding: .day, value: 1, to: lastDay) {
+                activityChart(from: firstDay, through: dayAfterLast)
             }
 
-            if activity.summarizedLargeFiles > 0 {
-                Label(
-                    "\(activity.summarizedLargeFiles) large \(activity.summarizedLargeFiles == 1 ? "log uses" : "logs use") recent-tail summaries; totals may be incomplete",
-                    systemImage: "bolt.fill"
-                )
-                .font(.system(size: 9))
+            if !resetDays.isEmpty {
+                HStack(spacing: 6) {
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: 1))
+                        path.addLine(to: CGPoint(x: 14, y: 1))
+                    }
+                    .stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                    .frame(width: 14, height: 2)
+                    .accessibilityHidden(true)
+                    Text("Weekly quota reset")
+                }
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             }
+            if activity.summarizedLargeFiles > 0 {
+                Text("Includes partial logs")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
 
-            Chart(activity.days) { day in
+            DisclosureGroup("Details", isExpanded: $detailsExpanded) {
+                activityDetails
+                    .padding(.top, 8)
+            }
+            .font(.system(size: 11))
+        }
+        .padding(.top, 8)
+    }
+
+    private func activityChart(from firstDay: Date, through dayAfterLast: Date) -> some View {
+        Chart {
+            ForEach(activity.days) { day in
                 if day.usage.totalTokens == 0 {
-                    PointMark(
-                        x: .value("Day", day.date, unit: .day),
-                        y: .value("Tokens", 0)
-                    )
-                    .symbolSize(9)
-                    .foregroundStyle(Color.secondary.opacity(0.55))
-                    .accessibilityLabel(day.date.formatted(.dateTime.weekday(.wide)))
-                    .accessibilityValue("0 tokens")
+                    PointMark(x: .value("Day", day.date, unit: .day), y: .value("Tokens", 0))
+                        .symbolSize(9)
+                        .foregroundStyle(Color.secondary.opacity(0.55))
+                        .accessibilityLabel(day.date.formatted(.dateTime.weekday(.wide)))
+                        .accessibilityValue("0 tokens")
                 } else {
                     BarMark(
                         x: .value("Day", day.date, unit: .day),
@@ -642,98 +615,70 @@ private struct ThisMacActivityView: View {
                     .accessibilityValue("\(day.usage.totalTokens) tokens")
                 }
             }
-            .chartXAxis {
-                AxisMarks(values: .stride(by: .day)) { value in
-                    AxisValueLabel(format: .dateTime.weekday(.narrow))
+            ForEach(resetDays, id: \.self) { day in
+                if let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: day) {
+                    RuleMark(x: .value("Day after reset", nextDay))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                        .foregroundStyle(Color.secondary)
+                        .accessibilityLabel("Weekly quota reset")
+                        .accessibilityValue(day.formatted(date: .abbreviated, time: .omitted))
                 }
             }
-            .chartYAxis(.hidden)
-            .frame(height: 62)
-            .accessibilityLabel("Seven-day token activity recorded on this Mac")
-            .accessibilityValue(accessibilitySummary)
-
-            if !visibleModels.isEmpty {
-                VStack(spacing: 6) {
-                    ForEach(visibleModels) { item in
-                        HStack(spacing: 8) {
-                            Text(item.model)
-                                .font(.system(size: 10, weight: .medium))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(modelShare(item))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .frame(width: 82, alignment: .trailing)
-                        }
-                        .font(.system(size: 10))
-                        .accessibilityElement(children: .combine)
-                    }
-                    if activity.models.count > 4 {
-                        Button(modelsExpanded ? "Show top models" : "Show all \(activity.models.count) models") {
-                            modelsExpanded.toggle()
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
+        }
+        .chartXScale(domain: firstDay...dayAfterLast, range: .plotDimension(padding: 4))
+        .chartXAxis {
+            AxisMarks(values: activity.days.map(\.date)) {
+                AxisValueLabel(format: .dateTime.weekday(.narrow), centered: true)
             }
+        }
+        .chartYAxis(.hidden)
+        .frame(height: 76)
+        .accessibilityLabel("Seven-day token activity recorded on this Mac")
+        .accessibilityValue(accessibilitySummary)
+    }
 
+    private var activityDetails: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Today \(compactTokens(activity.today.totalTokens))")
                 Spacer()
                 Text("Updated \(activity.sampledAt.formatted(date: .omitted, time: .shortened))")
             }
-            .font(.system(size: 10))
             .foregroundStyle(.secondary)
 
-            DisclosureGroup(isExpanded: $estimatesExpanded) {
-                VStack(alignment: .leading, spacing: 5) {
-                    LabeledContent("Equivalent standard API cost", value: formatted(automaticEstimate))
-                    if totalSavings > 0 {
-                        LabeledContent("Hypothetical difference vs GPT-5.6 Sol", value: formatted(totalSavings))
-                    }
-                    Divider()
-                    ForEach(activity.models) { item in
-                        LabeledContent(item.model, value: modelCost(item))
-                            .lineLimit(1)
-                    }
-                    Text("Recognized prices cover \(pricedCoveragePercent) of recorded tokens in this view.")
+            if activity.summarizedLargeFiles > 0 {
+                Text("Only recent entries were read from \(activity.summarizedLargeFiles) large logs. Totals may be incomplete.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(activity.models.prefix(showsAllModels ? activity.models.count : 4)) { item in
+                LabeledContent {
+                    Text(modelShare(item))
                         .foregroundStyle(.secondary)
-                    Text("Estimate only — not your ChatGPT or Codex bill. Standard API prices checked \(OpenAIPriceCatalog.effectiveDate) are applied only to recognized models recorded in session logs on this Mac. Summarized logs may be incomplete; unpriced models and other machines are excluded.")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .monospacedDigit()
+                } label: {
+                    Text(item.model)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                .font(.system(size: 10))
-                .padding(.top, 6)
-            } label: {
-                Text("Estimates")
-                    .font(.system(size: 10, weight: .medium))
+                .accessibilityElement(children: .combine)
+            }
+            if activity.models.count > 4 {
+                Button(showsAllModels ? "Show top models" : "Show all \(activity.models.count) models") {
+                    showsAllModels.toggle()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+            }
+            ForEach(resetDays, id: \.self) { day in
+                LabeledContent("Weekly quota reset", value: day.formatted(date: .abbreviated, time: .omitted))
             }
         }
-        .padding(16)
     }
 
-    private var visibleModels: ArraySlice<ModelTokenUsage> {
-        activity.models.prefix(modelsExpanded ? activity.models.count : 4)
-    }
-
-    private var automaticEstimate: Double {
-        let usd = activity.models.reduce(0) { total, item in
-            if let price = OpenAIPriceCatalog.price(for: item.model) { return total + price.estimate(item.usage) }
-            return total
-        }
-        return currency.convertFromUSD(usd)
-    }
-
-    private func modelCost(_ item: ModelTokenUsage) -> String {
-        if let price = OpenAIPriceCatalog.price(for: item.model) {
-            return formatted(currency.convertFromUSD(price.estimate(item.usage)))
-        }
-        return "Unpriced"
+    private var resetDays: [Date] {
+        let days = Set(activity.days.map(\.date))
+        return Set(weeklyResetDates.map { Calendar.current.startOfDay(for: $0) }).intersection(days).sorted()
     }
 
     private func modelShare(_ item: ModelTokenUsage) -> String {
@@ -741,29 +686,14 @@ private struct ThisMacActivityView: View {
         return "\(Int((Double(item.usage.totalTokens) / Double(activity.total.totalTokens) * 100).rounded()))% · \(compactTokens(item.usage.totalTokens))"
     }
 
-    private var pricedCoveragePercent: String {
-        guard activity.total.totalTokens > 0 else { return "0.0%" }
-        let pricedTokens = activity.models.reduce(Int64(0)) { total, item in
-            OpenAIPriceCatalog.price(for: item.model) == nil ? total : total + item.usage.totalTokens
-        }
-        return String(format: "%.1f%%", Double(pricedTokens) / Double(activity.total.totalTokens) * 100)
-    }
-
-    private func formatted(_ amount: Double) -> String {
-        "\(currency.symbol)\(amount.formatted(.number.precision(.fractionLength(2))))"
-    }
-
-    private func compactTokens(_ value: Int64) -> String {
-        if value >= 1_000_000_000 { return String(format: "%.1fB", Double(value) / 1_000_000_000) }
-        if value >= 1_000_000 { return String(format: "%.1fM", Double(value) / 1_000_000) }
-        if value >= 1_000 { return String(format: "%.1fK", Double(value) / 1_000) }
-        return "\(value)"
-    }
-
     private var accessibilitySummary: String {
-        activity.days.map { day in
+        let dailyTotals = activity.days.map { day in
             "\(day.date.formatted(.dateTime.weekday(.wide))): \(day.usage.totalTokens) tokens"
-        }.joined(separator: ", ")
+        }
+        let resets = resetDays.map { day in
+            "Weekly quota reset on \(day.formatted(date: .abbreviated, time: .omitted))"
+        }
+        return (dailyTotals + resets).joined(separator: ", ")
     }
 
     private func visibleTokenValue(_ tokens: Int64) -> Double {
