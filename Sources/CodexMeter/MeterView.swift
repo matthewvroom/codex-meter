@@ -353,6 +353,8 @@ struct MeterView: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            credits
+            Divider()
             HStack {
                 Text("Menu bar")
                     .font(.system(size: 12))
@@ -396,7 +398,6 @@ struct MeterView: View {
                     .foregroundStyle(.secondary)
             }
             .font(.system(size: 12))
-            about
         }
         .padding(.top, 10)
     }
@@ -452,25 +453,22 @@ struct MeterView: View {
         }
     }
 
-    private var about: some View {
-        DisclosureGroup("About Codex Meter") {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 4) {
-                    Text("Originally created by")
-                    Link("Jhye / The Jhye Factor", destination: URL(string: "https://github.com/TheJhyeFactor")!)
-                }
-                Text("Reimagined by Matthew Vroom")
-                HStack(spacing: 8) {
-                    Link("Portfolio", destination: URL(string: "https://matthewvroom.com/")!)
-                    Link("GitHub", destination: URL(string: "https://github.com/matthewvroom")!)
-                }
+    private var credits: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Reimagined by Matthew Vroom")
+                .font(.system(size: 12, weight: .medium))
+            HStack(spacing: 10) {
+                Link("Portfolio", destination: URL(string: "https://matthewvroom.com/")!)
+                Link("GitHub", destination: URL(string: "https://github.com/matthewvroom")!)
             }
-            .font(.system(size: 10))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 6)
+            HStack(spacing: 4) {
+                Text("Originally created by")
+                    .foregroundStyle(.secondary)
+                Link("Jhye / The Jhye Factor", destination: URL(string: "https://github.com/TheJhyeFactor")!)
+            }
         }
         .font(.system(size: 11))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var headerSubtitle: String {
