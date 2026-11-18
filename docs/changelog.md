@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.12
+
+- Renders the popover header from dedicated high-resolution artwork to avoid aliasing from the system application-icon cache.
+
 ## 1.6.11
 
 - Restores activity-scanner build compatibility with older Swift 6 toolchains while preserving incremental log scanning and the new icons and signature footer.
