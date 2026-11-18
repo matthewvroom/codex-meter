@@ -1,6 +1,5 @@
 import Charts
 import CodexMeterCore
-import ImageIO
 import SwiftUI
 
 struct MeterView: View {
@@ -75,7 +74,7 @@ struct MeterView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            headerIcon
+            MeterHeaderIcon()
                 .frame(width: 36, height: 36)
                 .accessibilityHidden(true)
 
@@ -527,27 +526,6 @@ struct MeterView: View {
         Link("Jhye / The Jhye Factor", destination: URL(string: "https://github.com/TheJhyeFactor")!)
             .fixedSize()
     }
-
-    @ViewBuilder
-    private var headerIcon: some View {
-        if let image = Self.headerArtwork {
-            Image(decorative: image, scale: 1)
-                .resizable()
-                .interpolation(.high)
-        } else {
-            Image(systemName: "gauge")
-                .resizable()
-                .scaledToFit()
-        }
-    }
-
-    private static let headerArtwork: CGImage? = {
-        guard let url = Bundle.main.url(forResource: "HeaderIcon", withExtension: "png"),
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
-            return nil
-        }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
-    }()
 
     private static let creatorSignature: NSImage? = {
         guard let url = Bundle.main.url(forResource: "CreatorSignature", withExtension: "svg") else {

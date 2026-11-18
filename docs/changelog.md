@@ -2,7 +2,7 @@
 
 ## 1.6.12
 
-- Renders the popover header from dedicated high-resolution artwork to avoid aliasing from the system application-icon cache.
+- Draws the popover header icon with native vector shapes and stronger strokes for clearer edges on standard and Retina displays.
 
 ## 1.6.11
 

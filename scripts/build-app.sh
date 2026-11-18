@@ -28,7 +28,6 @@ cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
 iconutil -c icns -o "$APP/Contents/Resources/AppIcon.icns" "$ROOT/Resources/AppIcon.iconset"
 cp "$ROOT/Resources/CreatorSignature.svg" "$APP/Contents/Resources/CreatorSignature.svg"
-cp "$ROOT/Resources/HeaderIcon.png" "$APP/Contents/Resources/HeaderIcon.png"
 
 xattr -cr "$APP"
 codesign --force --deep --sign - "$APP"
