@@ -23,8 +23,8 @@ jobs:
         run: |
           file "dist/Codex Meter.app/Contents/MacOS/CodexMeter"
           for arch in arm64 x86_64; do
-            xcrun lipo -verify_arch "$arch" "dist/Codex Meter.app/Contents/MacOS/CodexMeter"
-            xcrun lipo -verify_arch "$arch" "dist/codex-meter"
+            xcrun lipo "dist/Codex Meter.app/Contents/MacOS/CodexMeter" -verify_arch "$arch"
+            xcrun lipo "dist/codex-meter" -verify_arch "$arch"
           done
           codesign --verify --deep --strict "dist/Codex Meter.app"
           codesign --verify --strict "dist/codex-meter"

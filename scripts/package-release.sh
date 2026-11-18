@@ -18,8 +18,8 @@ unzip -q "$STAGE/$ARCHIVE" -d "$STAGE/check"
 EXTRACTED="$STAGE/check/Codex Meter $VERSION"
 APP="$EXTRACTED/Codex Meter.app"
 for ARCH in arm64 x86_64; do
-  xcrun lipo -verify_arch "$ARCH" "$APP/Contents/MacOS/CodexMeter"
-  xcrun lipo -verify_arch "$ARCH" "$EXTRACTED/codex-meter"
+  xcrun lipo "$APP/Contents/MacOS/CodexMeter" -verify_arch "$ARCH"
+  xcrun lipo "$EXTRACTED/codex-meter" -verify_arch "$ARCH"
 done
 codesign --verify --deep --strict "$APP"
 codesign --verify --strict "$EXTRACTED/codex-meter"
