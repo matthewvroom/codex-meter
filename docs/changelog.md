@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.11
+
+- Restores activity-scanner build compatibility with older Swift 6 toolchains while preserving incremental log scanning and the new icons and signature footer.
+
 ## 1.6.10
 
 - Shows banked reset availability above the quota and marks observed weekly resets on the seven-day activity chart.

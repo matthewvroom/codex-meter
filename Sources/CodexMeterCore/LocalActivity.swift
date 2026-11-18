@@ -376,7 +376,16 @@ public actor LocalActivityScanner {
             decodedRecords = decodedRecords || parsed.decodedRecords
 
             let sessionID = file.url.deletingPathExtension().lastPathComponent
-            let isPartial = isLarge && (offset > 0 || (sessionStartDate(for: file.url).map { $0 < cutoff } ?? true))
+            let isPartial: Bool
+            if !isLarge {
+                isPartial = false
+            } else if offset > 0 {
+                isPartial = true
+            } else if let startedAt = sessionStartDate(for: file.url) {
+                isPartial = startedAt < cutoff
+            } else {
+                isPartial = true
+            }
             if !isPartial, let earliest = parsed.records.min(by: { $0.date < $1.date })?.date {
                 firstCompleteRecordDates[sessionID] = min(firstCompleteRecordDates[sessionID] ?? earliest, earliest)
             }
@@ -433,8 +442,7 @@ public actor LocalActivityScanner {
 
     private func parseLog(_ file: LogFile, from offset: Int) throws -> ParsedLog {
         let length = file.version.size - offset
-        var parsed = ParsedLog(version: file.version)
-        guard length > 0 else { return parsed }
+        guard length > 0 else { return ParsedLog(version: file.version) }
 
         let data: Data
         do {
@@ -447,8 +455,14 @@ public actor LocalActivityScanner {
         }
         // A log that grew during the read is picked up by its next version.
         guard data.count == length else { throw LocalActivityError.unreadableSource }
-        try data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
-            guard let base = bytes.baseAddress else { return }
+        let decoded = try data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+            var parsed = (
+                records: [CumulativeRecord](),
+                lastModel: String?.none,
+                hadCandidates: false,
+                decodedRecords: false
+            )
+            guard let base = bytes.baseAddress else { return parsed }
             var start = 0
             var nextCancellationCheck = 0
             while start < bytes.count {
@@ -477,8 +491,15 @@ public actor LocalActivityScanner {
                     parsed.records.append(CumulativeRecord(date: date, total: total, model: parsed.lastModel))
                 }
             }
+            return parsed
         }
-        return parsed
+        return ParsedLog(
+            version: file.version,
+            records: decoded.records,
+            lastModel: decoded.lastModel,
+            hadCandidates: decoded.hadCandidates,
+            decodedRecords: decoded.decodedRecords
+        )
     }
 
     private func sessionStartDate(for url: URL) -> Date? {
