@@ -8,6 +8,8 @@
 - A truncated archived copy no longer removes usage recorded in a complete copy of the same session.
 - Updated download and first-launch instructions for this fork.
 - Added creator and contributor credits in Settings.
+- Added a custom dial icon with simpler artwork for small sizes and a larger terminal prompt in the full icon.
+- Moved creator credits to the bottom of Settings with a clickable Matthew Vroom signature and aligned portfolio, GitHub and original-author links.
 
 ## 1.6.9
 

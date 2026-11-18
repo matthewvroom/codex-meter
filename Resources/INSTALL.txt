@@ -1,11 +1,19 @@
 CODEX METER
 
 APP
-1. Quit any running copy of Codex Meter. Replace it in its current location,
-   or move "Codex Meter.app" to /Applications for a first install.
-2. Open Codex Meter once. The community ZIP is ad-hoc signed and macOS may
-   block it on first launch. See Apple's current first-launch guidance:
+Requires macOS 13 or later (Apple silicon or Intel) and a signed-in Codex
+installation through the ChatGPT app or Codex CLI. No separate Meter sign-in
+or API key is needed for the default account.
+
+1. Unzip the download. For a first install, move "Codex Meter.app" to
+   /Applications. To update, quit Codex Meter and replace it where it lives.
+2. Open Codex Meter and look for the gauge in your menu bar.
+3. The community ZIP is ad-hoc signed and is not notarized. If macOS
+   blocks the first launch, follow Apple's guidance for trusted apps:
    https://support.apple.com/en-us/102445
+
+This Mac activity shows sessions recorded on this Mac. It can be empty
+until you run a Codex session here.
 
 CLI (OPTIONAL)
 Move "codex-meter" somewhere on your PATH, for example:

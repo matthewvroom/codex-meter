@@ -26,6 +26,9 @@ xcrun lipo -create \
   -output "$STAGE/codex-meter"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
+iconutil -c icns -o "$APP/Contents/Resources/AppIcon.icns" "$ROOT/Resources/AppIcon.iconset"
+cp "$ROOT/Resources/CreatorSignature.svg" "$APP/Contents/Resources/CreatorSignature.svg"
+
 xattr -cr "$APP"
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"

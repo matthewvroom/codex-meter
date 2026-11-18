@@ -74,14 +74,11 @@ struct MeterView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.28 : 0.14))
-                Image(systemName: "gauge.with.dots.needle.50percent")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-            }
-            .frame(width: 36, height: 36)
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 36, height: 36)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Codex Meter")
@@ -353,8 +350,6 @@ struct MeterView: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            credits
-            Divider()
             HStack {
                 Text("Menu bar")
                     .font(.system(size: 12))
@@ -398,6 +393,8 @@ struct MeterView: View {
                     .foregroundStyle(.secondary)
             }
             .font(.system(size: 12))
+            Divider()
+            credits
         }
         .padding(.top, 10)
     }
@@ -454,22 +451,90 @@ struct MeterView: View {
     }
 
     private var credits: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Reimagined by Matthew Vroom")
-                .font(.system(size: 12, weight: .medium))
-            HStack(spacing: 10) {
-                Link("Portfolio", destination: URL(string: "https://matthewvroom.com/")!)
-                Link("GitHub", destination: URL(string: "https://github.com/matthewvroom")!)
+        HStack(alignment: .center, spacing: 11) {
+            if let signature = Self.creatorSignature {
+                Link(destination: URL(string: "https://matthewvroom.com/")!) {
+                    Image(nsImage: signature)
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(.primary)
+                        .frame(width: 56, height: 80)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Visit Matthew Vroom’s portfolio")
+                .help("Visit Matthew Vroom’s portfolio")
             }
-            HStack(spacing: 4) {
-                Text("Originally created by")
-                    .foregroundStyle(.secondary)
-                Link("Jhye / The Jhye Factor", destination: URL(string: "https://github.com/TheJhyeFactor")!)
+
+            VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Reimagined by")
+                        .foregroundStyle(.secondary)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            creatorName
+                            Spacer(minLength: 0)
+                            creatorLinks
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            creatorName
+                            HStack {
+                                Spacer(minLength: 0)
+                                creatorLinks
+                            }
+                        }
+                    }
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("Originally created by")
+                            .foregroundStyle(.secondary)
+                            .fixedSize()
+                        Spacer(minLength: 0)
+                        originalCreatorLink
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Originally created by")
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            Spacer(minLength: 0)
+                            originalCreatorLink
+                        }
+                    }
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.system(size: 11))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    private var creatorName: some View {
+        Text("Matthew Vroom")
+            .font(.system(size: 13, weight: .semibold))
+            .fixedSize()
+    }
+
+    private var creatorLinks: some View {
+        HStack(spacing: 10) {
+            Link("GitHub", destination: URL(string: "https://github.com/matthewvroom")!)
+            Link("Portfolio", destination: URL(string: "https://matthewvroom.com/")!)
+        }
+        .fixedSize()
+    }
+
+    private var originalCreatorLink: some View {
+        Link("Jhye / The Jhye Factor", destination: URL(string: "https://github.com/TheJhyeFactor")!)
+            .fixedSize()
+    }
+
+    private static let creatorSignature: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "CreatorSignature", withExtension: "svg") else {
+            return nil
+        }
+        return NSImage(contentsOf: url)
+    }()
 
     private var headerSubtitle: String {
         if store.isStale { return "Usage data is stale" }

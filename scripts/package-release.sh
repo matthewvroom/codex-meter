@@ -23,6 +23,10 @@ for ARCH in arm64 x86_64; do
 done
 codesign --verify --deep --strict "$APP"
 codesign --verify --strict "$EXTRACTED/codex-meter"
+ICON="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$APP/Contents/Info.plist")"
+test -s "$APP/Contents/Resources/$ICON"
+cmp "$ROOT/Resources/CreatorSignature.svg" "$APP/Contents/Resources/CreatorSignature.svg"
+cmp "$ROOT/Resources/INSTALL.txt" "$EXTRACTED/INSTALL.txt"
 cmp "$ROOT/LICENSE" "$EXTRACTED/LICENSE"
 "$EXTRACTED/codex-meter" --help >/dev/null
 
