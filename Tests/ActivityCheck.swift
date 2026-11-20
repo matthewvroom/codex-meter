@@ -54,6 +54,21 @@ struct ActivityCheck {
         precondition(unchanged.filesRead == 0)
         precondition(unchanged.total == snapshot.total)
 
+        let hourly = try await scanner.scan(days: 7, includeHourlyUsage: true)
+        precondition(hourly.filesRead == 0)
+        precondition(hourly.total == snapshot.total)
+        for day in hourly.days {
+            guard let hours = day.hours else { preconditionFailure("Missing opted-in hourly data") }
+            precondition(hours.reduce(TokenUsage()) { $0 + $1.usage } == day.usage)
+        }
+        precondition(hourly.days.contains { $0.hours == [] })
+        let encoded = try JSONEncoder().encode(snapshot)
+        let json = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        let encodedDays = json?["days"] as? [[String: Any]]
+        precondition(encodedDays?.allSatisfy { $0["hours"] == nil } == true)
+        let decoded = try JSONDecoder().decode(LocalActivitySnapshot.self, from: encoded)
+        precondition(decoded.days.allSatisfy { $0.hours == nil })
+
         let appended = try FileHandle(forWritingTo: activeLog)
         try appended.seekToEnd()
         try appended.write(contentsOf: Data((event(at: 0, input: 40, cached: 5, output: 10, total: 50) + "\n").utf8))
@@ -117,12 +132,13 @@ struct ActivityCheck {
             roots: [truncatedRoot],
             largeFileThresholdBytes: 1,
             largeFileTailBytes: 4_096
-        ).scan(days: 7)
+        ).scan(days: 7, includeHourlyUsage: true)
         precondition(truncated.summarizedLargeFiles == 1)
         precondition(truncated.total.inputTokens == 100)
         precondition(truncated.total.cachedInputTokens == 40)
         precondition(truncated.total.outputTokens == 20)
         precondition(truncated.total.totalTokens == 120)
+        precondition(truncated.days.flatMap { $0.hours ?? [] }.map(\.usage.totalTokens) == [120])
 
         let overlapScanner = LocalActivityScanner(
             roots: [active, archived],
@@ -165,12 +181,50 @@ struct ActivityCheck {
         let timezoneSnapshot = try await LocalActivityScanner(
             roots: [timezoneRoot],
             calendar: pacificCalendar
-        ).scan(days: 2, now: pacificNow)
+        ).scan(days: 2, now: pacificNow, includeHourlyUsage: true)
         precondition(timezoneSnapshot.days.count == 2)
         precondition(timezoneSnapshot.days[0].usage.totalTokens == 10)
         precondition(timezoneSnapshot.days[1].usage.totalTokens == 20)
         precondition(pacificCalendar.component(.weekday, from: timezoneSnapshot.days[0].date) == 1)
         precondition(pacificCalendar.component(.weekday, from: timezoneSnapshot.days[1].date) == 2)
+        precondition(timezoneSnapshot.days[0].hours?.map(\.date) == [formatter.date(from: "2026-08-23T23:00:00-07:00")!])
+        precondition(timezoneSnapshot.days[1].hours?.map(\.date) == [formatter.date(from: "2026-08-24T00:00:00-07:00")!])
+
+        let fallBackRoot = root.appendingPathComponent("fall-back", isDirectory: true)
+        try FileManager.default.createDirectory(at: fallBackRoot, withIntermediateDirectories: true)
+        func hourlyEvent(_ timestamp: String, _ total: Int) -> String {
+            #"{"timestamp":"\#(timestamp)","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":\#(total),"cached_input_tokens":0,"output_tokens":0,"total_tokens":\#(total)}}}}"#
+        }
+        let fallBackRecords = [
+            hourlyEvent("2026-11-01T01:05:00-07:00", 10),
+            hourlyEvent("2026-11-01T01:45:00-07:00", 15),
+            hourlyEvent("2026-11-01T01:15:00-08:00", 35),
+            hourlyEvent("2026-11-01T02:00:00-08:00", 99)
+        ].joined(separator: "\n") + "\n"
+        try Data(fallBackRecords.utf8).write(to: fallBackRoot.appendingPathComponent("rollout-fall-back.jsonl"))
+        let fallBack = try await LocalActivityScanner(roots: [fallBackRoot], calendar: pacificCalendar)
+            .scan(days: 1, now: formatter.date(from: "2026-11-01T01:50:00-08:00")!, includeHourlyUsage: true)
+        let expectedStarts = ["2026-11-01T01:00:00-07:00", "2026-11-01T01:00:00-08:00"]
+            .map { formatter.date(from: $0)! }
+        precondition(fallBack.days.first?.hours?.map(\.date) == expectedStarts)
+        precondition(fallBack.days.first?.hours?.map(\.usage.totalTokens) == [15, 20])
+        precondition(fallBack.total.totalTokens == 35)
+
+        let halfHourRoot = root.appendingPathComponent("half-hour-shift", isDirectory: true)
+        try FileManager.default.createDirectory(at: halfHourRoot, withIntermediateDirectories: true)
+        let halfHourRecords = [
+            hourlyEvent("2026-04-05T01:40:00+11:00", 10),
+            hourlyEvent("2026-04-05T01:40:00+10:30", 25)
+        ].joined(separator: "\n") + "\n"
+        try Data(halfHourRecords.utf8).write(to: halfHourRoot.appendingPathComponent("rollout-half-hour.jsonl"))
+        var lordHoweCalendar = Calendar(identifier: .gregorian)
+        lordHoweCalendar.timeZone = TimeZone(identifier: "Australia/Lord_Howe")!
+        let halfHour = try await LocalActivityScanner(roots: [halfHourRoot], calendar: lordHoweCalendar)
+            .scan(days: 1, now: formatter.date(from: "2026-04-05T03:00:00+10:30")!, includeHourlyUsage: true)
+        let halfHourStarts = ["2026-04-05T01:00:00+11:00", "2026-04-05T01:30:00+10:30"]
+            .map { formatter.date(from: $0)! }
+        precondition(halfHour.days.first?.hours?.map(\.date) == halfHourStarts)
+        precondition(halfHour.days.first?.hours?.map(\.usage.totalTokens) == [10, 15])
 
         let invalidRoot = root.appendingPathComponent("invalid", isDirectory: true)
         try FileManager.default.createDirectory(at: invalidRoot, withIntermediateDirectories: true)

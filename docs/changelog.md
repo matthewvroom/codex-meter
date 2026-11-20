@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.13
+
+- Select a day in This Mac activity to see its token total and hourly usage in local time beneath the seven-day chart. Days with no recorded activity have an empty state, and partial logs are flagged.
+
 ## 1.6.12
 
 - Draws the popover header icon with native vector shapes and stronger strokes for clearer edges on standard and Retina displays.

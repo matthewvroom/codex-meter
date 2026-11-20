@@ -614,16 +614,24 @@ private struct ThisMacActivityView: View {
     let weeklyResetDates: [Date]
     @AppStorage("localActivityDetailsExpanded") private var detailsExpanded = false
     @State private var showsAllModels = false
+    @State private var selectedDate: Date?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Last seven days")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("Last seven days")
+                    .font(.system(size: 11))
+                Spacer()
+                if selectedDay == nil, activity.days.contains(where: { $0.hours != nil }) {
+                    Text("Select a day")
+                        .font(.system(size: 10))
+                }
+            }
+            .foregroundStyle(.secondary)
 
             if let firstDay = activity.days.first?.date,
                let lastDay = activity.days.last?.date,
-               let dayAfterLast = Calendar.current.date(byAdding: .day, value: 1, to: lastDay) {
+               let dayAfterLast = Calendar.current.dateInterval(of: .day, for: lastDay)?.end {
                 activityChart(from: firstDay, through: dayAfterLast)
             }
 
@@ -647,6 +655,12 @@ private struct ThisMacActivityView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if let selectedDay, let hours = selectedDay.hours,
+               let dayEnd = Calendar.current.dateInterval(of: .day, for: selectedDay.date)?.end {
+                Divider()
+                intradayActivity(for: selectedDay, hours: hours, dayEnd: dayEnd)
+            }
+
             DisclosureGroup("Details", isExpanded: $detailsExpanded) {
                 activityDetails
                     .padding(.top, 8)
@@ -654,6 +668,15 @@ private struct ThisMacActivityView: View {
             .font(.system(size: 11))
         }
         .padding(.top, 8)
+        .onChange(of: activity.days.map(\.date)) { dates in
+            if let selectedDate, !dates.contains(selectedDate) {
+                self.selectedDate = nil
+            }
+        }
+    }
+
+    private var selectedDay: DailyTokenUsage? {
+        activity.days.first { $0.date == selectedDate }
     }
 
     private func activityChart(from firstDay: Date, through dayAfterLast: Date) -> some View {
@@ -662,7 +685,7 @@ private struct ThisMacActivityView: View {
                 if day.usage.totalTokens == 0 {
                     PointMark(x: .value("Day", day.date, unit: .day), y: .value("Tokens", 0))
                         .symbolSize(9)
-                        .foregroundStyle(Color.secondary.opacity(0.55))
+                        .foregroundStyle(day.date == selectedDate ? Color.accentColor : Color.secondary.opacity(0.55))
                         .accessibilityLabel(day.date.formatted(.dateTime.weekday(.wide)))
                         .accessibilityValue("0 tokens")
                 } else {
@@ -670,14 +693,14 @@ private struct ThisMacActivityView: View {
                         x: .value("Day", day.date, unit: .day),
                         y: .value("Tokens", visibleTokenValue(day.usage.totalTokens))
                     )
-                    .foregroundStyle(day.id == activity.days.last?.id ? Color.accentColor : Color.accentColor.opacity(0.62))
+                    .foregroundStyle(day.date == (selectedDate ?? activity.days.last?.date) ? Color.accentColor : Color.accentColor.opacity(0.62))
                     .cornerRadius(2)
                     .accessibilityLabel(day.date.formatted(.dateTime.weekday(.wide)))
                     .accessibilityValue("\(day.usage.totalTokens) tokens")
                 }
             }
             ForEach(resetDays, id: \.self) { day in
-                if let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: day) {
+                if let nextDay = Calendar.current.dateInterval(of: .day, for: day)?.end {
                     RuleMark(x: .value("Day after reset", nextDay))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
                         .foregroundStyle(Color.secondary)
@@ -693,9 +716,104 @@ private struct ThisMacActivityView: View {
             }
         }
         .chartYAxis(.hidden)
+        .chartOverlay { proxy in
+            GeometryReader { geometry in
+                let plot = geometry[proxy.plotAreaFrame]
+                ForEach(activity.days) { day in
+                    if day.hours != nil,
+                       let nextDay = Calendar.current.dateInterval(of: .day, for: day.date)?.end,
+                       let left = proxy.position(forX: day.date),
+                       let right = proxy.position(forX: nextDay), right != left {
+                        Button {
+                            selectedDate = selectedDate == day.date ? nil : day.date
+                        } label: {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.accentColor.opacity(selectedDate == day.date ? 0.14 : 0))
+                                .frame(width: abs(right - left), height: plot.height)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(day.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                        .accessibilityValue("\(day.usage.totalTokens.formatted()) tokens")
+                        .accessibilityHint("Show or hide tokens by hour")
+                        .accessibilityAddTraits(selectedDate == day.date ? .isSelected : [])
+                        .position(x: plot.minX + (left + right) / 2, y: plot.midY)
+                    }
+                }
+            }
+        }
         .frame(height: 76)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Seven-day token activity recorded on this Mac")
         .accessibilityValue(accessibilitySummary)
+    }
+
+    private func intradayActivity(for day: DailyTokenUsage, hours: [HourlyTokenUsage], dayEnd: Date) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(day.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                    .fontWeight(.semibold)
+                Spacer(minLength: 4)
+                Text("\(day.usage.totalTokens.formatted()) tokens")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                Button {
+                    selectedDate = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Close day detail")
+                .accessibilityLabel("Close day detail")
+            }
+
+            if hours.isEmpty {
+                Text("No activity recorded on this Mac for this day.")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Tokens per hour")
+                    .foregroundStyle(.secondary)
+                Chart(hours) { hour in
+                    if let interval = Calendar.current.dateInterval(of: .hour, for: hour.date) {
+                        RectangleMark(
+                            xStart: .value("Hour start", max(day.date, hour.date)),
+                            xEnd: .value("Hour end", min(dayEnd, interval.end)),
+                            yStart: .value("Zero", 0.0),
+                            yEnd: .value("Tokens", Double(hour.usage.totalTokens))
+                        )
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityLabel(hour.date.formatted(.dateTime.hour().minute().timeZone(.specificName(.short))))
+                        .accessibilityValue("\(hour.usage.totalTokens.formatted()) tokens")
+                    }
+                }
+                .chartXScale(domain: day.date...dayEnd)
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .hour, count: 6)) {
+                        AxisValueLabel(format: .dateTime.hour())
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(values: .automatic(desiredCount: 3)) { tick in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let value = tick.as(Double.self), let tokens = Int64(exactly: value) {
+                                Text(compactTokens(tokens))
+                            }
+                        }
+                    }
+                }
+                .frame(height: 104)
+                .accessibilityLabel("Tokens per hour recorded on this Mac")
+            }
+
+            if activity.summarizedLargeFiles > 0 {
+                Text("Some logs are partial, so blank hours may be incomplete.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .font(.system(size: 11))
     }
 
     private var activityDetails: some View {

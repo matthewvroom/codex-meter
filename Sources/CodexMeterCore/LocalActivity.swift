@@ -66,7 +66,8 @@ public enum LocalActivityError: LocalizedError, Equatable {
     }
 }
 
-public struct DailyTokenUsage: Codable, Equatable, Identifiable, Sendable {
+public struct HourlyTokenUsage: Codable, Equatable, Identifiable, Sendable {
+    /// Start of the local hour, or of the remaining part of an hour after a clock change.
     public let date: Date
     public let usage: TokenUsage
     public var id: Date { date }
@@ -74,6 +75,20 @@ public struct DailyTokenUsage: Codable, Equatable, Identifiable, Sendable {
     public init(date: Date, usage: TokenUsage) {
         self.date = date
         self.usage = usage
+    }
+}
+
+public struct DailyTokenUsage: Codable, Equatable, Identifiable, Sendable {
+    public let date: Date
+    public let usage: TokenUsage
+    /// Recorded usage by hour. Nil when the scan did not request hourly detail.
+    public let hours: [HourlyTokenUsage]?
+    public var id: Date { date }
+
+    public init(date: Date, usage: TokenUsage, hours: [HourlyTokenUsage]? = nil) {
+        self.date = date
+        self.usage = usage
+        self.hours = hours
     }
 }
 
@@ -273,10 +288,13 @@ public actor LocalActivityScanner {
         self.largeFileTailBytes = max(1_024, largeFileTailBytes)
     }
 
-    public func scan(days dayCount: Int = 7, now: Date = Date()) async throws -> LocalActivitySnapshot {
+    public func scan(
+        days dayCount: Int = 7, now: Date = Date(), includeHourlyUsage: Bool = false
+    ) async throws -> LocalActivitySnapshot {
         let days = max(1, min(90, dayCount))
         let startToday = calendar.startOfDay(for: now)
-        let cutoff = calendar.date(byAdding: .day, value: -(days - 1), to: startToday) ?? startToday
+        let firstDate = calendar.date(byAdding: .day, value: -(days - 1), to: startToday) ?? startToday
+        let cutoff = calendar.startOfDay(for: firstDate)
         let candidates = try discoverFiles(modifiedSince: calendar.date(byAdding: .day, value: -1, to: cutoff) ?? cutoff)
         let candidateURLs = Set(candidates.map(\.url))
         cachedLogs = cachedLogs.filter { candidateURLs.contains($0.key) }
@@ -284,18 +302,30 @@ public actor LocalActivityScanner {
 
         var seen = Set<String>()
         var buckets: [Date: TokenUsage] = [:]
+        var hourlyBuckets: [Date: [Date: TokenUsage]] = [:]
         var modelBuckets: [String: TokenUsage] = [:]
         for event in result.events where event.date >= cutoff && event.date <= now {
             try Task.checkCancellation()
             guard seen.insert(event.fingerprint).inserted else { continue }
             let day = calendar.startOfDay(for: event.date)
             buckets[day] = (buckets[day] ?? TokenUsage()) + event.usage
+            if includeHourlyUsage {
+                let hour = hourStart(containing: event.date, dayStart: day)
+                hourlyBuckets[day, default: [:]][hour] =
+                    (hourlyBuckets[day]?[hour] ?? TokenUsage()) + event.usage
+            }
             modelBuckets[event.model] = (modelBuckets[event.model] ?? TokenUsage()) + event.usage
         }
 
         let output = (0..<days).compactMap { offset -> DailyTokenUsage? in
-            guard let date = calendar.date(byAdding: .day, value: offset, to: cutoff) else { return nil }
-            return DailyTokenUsage(date: date, usage: buckets[date] ?? TokenUsage())
+            guard let day = calendar.date(byAdding: .day, value: offset, to: cutoff) else { return nil }
+            let date = calendar.startOfDay(for: day)
+            let hours = includeHourlyUsage
+                ? hourlyBuckets[date, default: [:]].sorted { $0.key < $1.key }.map {
+                    HourlyTokenUsage(date: $0.key, usage: $0.value)
+                }
+                : nil
+            return DailyTokenUsage(date: date, usage: buckets[date] ?? TokenUsage(), hours: hours)
         }
         var modelOutput = modelBuckets.map { key, value in ModelTokenUsage(model: key, usage: value) }
         modelOutput.sort { lhs, rhs in
@@ -309,6 +339,19 @@ public actor LocalActivityScanner {
             filesRead: result.filesRead,
             summarizedLargeFiles: result.summarizedLargeFiles
         )
+    }
+
+    private func hourStart(containing date: Date, dayStart: Date) -> Date {
+        let hour = max(dayStart, calendar.dateInterval(of: .hour, for: date)?.start ?? dayStart)
+        let zone = calendar.timeZone
+        // For fractional-hour clock changes, the calendar's hour can start before
+        // the clock moved. Assign the new offset its own bucket at the transition.
+        if zone.secondsFromGMT(for: hour) != zone.secondsFromGMT(for: date),
+           let transition = zone.nextDaylightSavingTimeTransition(after: hour),
+           transition <= date {
+            return transition
+        }
+        return hour
     }
 
     private func discoverFiles(modifiedSince cutoff: Date) throws -> [LogFile] {

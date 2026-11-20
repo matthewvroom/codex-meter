@@ -54,6 +54,7 @@ Alert thresholds, menu-bar modes, history charts and CLI automation stay on your
 - Warns once when remaining usage crosses below 10%, 20%, or 30%, then waits for recovery or a new reset window.
 - Detects stale or unavailable data instead of leaving a misleading old number visible.
 - Builds a seven-day This Mac activity chart from aggregate events in Codex session logs on this machine.
+- Click a day in the chart to see its token total and usage by hour in local time.
 - Marks observed weekly quota resets at the end of the day they occurred.
 - Breaks this Mac's recorded usage down by the actual model recorded for each Codex turn.
 - Adds accounts through OpenAI's secure browser login, then hot-swaps profiles from the account menu beside refresh.

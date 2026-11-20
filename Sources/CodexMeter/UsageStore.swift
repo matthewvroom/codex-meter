@@ -165,11 +165,26 @@ final class UsageStore: ObservableObject {
                 availableResetCredits: 1
             )
             let previewTokens: [Int64] = [8_000_000, 0, 5_000, 3_000_000, 0, 0, 9_000_000]
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: now)
             activity = LocalActivitySnapshot(
                 days: previewTokens.enumerated().map { offset, tokens in
-                    DailyTokenUsage(
-                        date: Calendar.current.date(byAdding: .day, value: offset - 6, to: Calendar.current.startOfDay(for: now)) ?? now,
-                        usage: TokenUsage(inputTokens: tokens, cachedInputTokens: tokens / 2, outputTokens: tokens / 10, totalTokens: tokens)
+                    let date = calendar.date(byAdding: .day, value: offset - 6, to: today) ?? today
+                    let starts = [8, 11, 16].compactMap { calendar.date(byAdding: .hour, value: $0, to: date) }
+                        .filter { $0 <= now }
+                    let bucketDates = starts.isEmpty ? [date] : starts
+                    let count = Int64(bucketDates.count)
+                    let share = tokens / (count * (count + 1) / 2)
+                    var assigned: Int64 = 0
+                    let hours: [HourlyTokenUsage] = tokens == 0 ? [] : bucketDates.enumerated().map { index, start in
+                        let total = index == bucketDates.count - 1 ? tokens - assigned : share * Int64(index + 1)
+                        assigned += total
+                        return HourlyTokenUsage(date: start, usage: TokenUsage(inputTokens: total, totalTokens: total))
+                    }
+                    return DailyTokenUsage(
+                        date: date,
+                        usage: hours.reduce(TokenUsage()) { $0 + $1.usage },
+                        hours: hours
                     )
                 },
                 models: [
@@ -324,7 +339,7 @@ final class UsageStore: ObservableObject {
     private func scanActivityWithTimeout() async throws -> LocalActivitySnapshot {
         let scanner = activityScanner
         return try await withThrowingTaskGroup(of: LocalActivitySnapshot.self) { group in
-            group.addTask { try await scanner.scan(days: 7) }
+            group.addTask { try await scanner.scan(days: 7, includeHourlyUsage: true) }
             group.addTask {
                 try await Task.sleep(for: .seconds(45))
                 throw LocalActivityError.timedOut
