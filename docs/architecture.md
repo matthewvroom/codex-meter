@@ -13,11 +13,11 @@ Codex Meter is a SwiftUI/AppKit status-bar application with six small layers:
 
 Account deletion removes the selected non-default profile only after a native confirmation. Missing profile folders are treated as an already-completed filesystem removal so stale account records can still be cleared.
 
-The desktop Codex app uses the default Codex authentication profile. A confirmed **Meter + Codex** switch closes the desktop app, creates a default-home app-server connection, calls the documented `account/logout` method, starts `account/login/start` with ChatGPT browser authentication, waits for `account/login/completed`, verifies the result with `account/read`, and relaunches Codex. This is deliberately a fresh OAuth flow: Codex Meter does not copy tokens between profiles, collect passwords or MFA codes, call internal token-login modes, or request Accessibility control.
+Profiles are managed under **Settings → Accounts**. With multiple profiles, the header switcher changes the local app-server connection Meter uses to read quota. The desktop Codex app continues to use its existing sign-in.
 
 The client performs the required `initialize` handshake before calling `account/rateLimits/read`. It prefers the `codex` entry in the multi-bucket response and falls back to the backward-compatible single-bucket response. Percentages are clamped to 0–100, and the menu bar displays the lowest remaining percentage across returned windows.
 
-The app intentionally does not consume rate-limit reset credits or expose conversation, configuration, or usage-changing methods. Its only authentication writes are explicit user-confirmed logout/login operations during desktop account switching.
+The app intentionally does not consume rate-limit reset credits or expose conversation, configuration, or usage-changing methods. Adding a profile is the only flow that starts an authentication operation.
 
 ## This Mac activity
 
@@ -25,7 +25,7 @@ The scanner discovers recent `.jsonl` files under `~/.codex/sessions` and `~/.co
 
 The seven-day scan uses recently modified logs and reads only the recent tail of large files. Each completed file is cached in memory. Reopening the popover resumes work by reusing unchanged files and reading new or changed files. The file in progress when a scan is canceled is retried. Scans also run on manual refresh and every ten minutes in activity-chart menu mode. Quota checks run on a separate two-minute schedule.
 
-The chart overlays the active profile’s observed weekly quota resets at the end of the local day they occurred. Meter identifies a reset from successive Codex quota responses that show a new weekly window and lower usage. The history starts with the first successful reading and skips ambiguous changes.
+The activity overview marks the active profile’s observed credit resets at the end of the local day they occurred. The selected day’s hourly chart marks them at the recorded time. Meter identifies a reset from successive Codex quota responses that show a new weekly window and lower usage. The history starts with the first successful reading and skips ambiguous changes.
 
 Milestone banners are local UI state triggered by token, low-usage and reset-credit transitions. Banked resets come directly from `rateLimitResetCredits.availableCount`. The UI shows the count as unavailable when that field is absent.
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.14
+
+- Moves account management to **Settings → Accounts** and shows the header switcher only when multiple profiles are available.
+- Renames the activity chart marker to **Credit reset** and shows the recorded reset time on the selected day's hourly chart.
+- Moves the explanation of incomplete activity into **Details** and gives the popover more room for the credits footer before it scrolls.
+
 ## 1.6.13
 
 - Select a day in This Mac activity to see its token total and hourly usage in local time beneath the seven-day chart. Days with no recorded activity have an empty state, and partial logs are flagged.

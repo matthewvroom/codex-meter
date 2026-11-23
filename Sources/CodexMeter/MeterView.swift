@@ -8,6 +8,7 @@ struct MeterView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("localActivityExpanded") private var localActivityExpanded = true
     @AppStorage("settingsExpanded") private var settingsExpanded = false
+    @AppStorage("accountsExpanded") private var accountsExpanded = false
     @State private var panelContentHeight: CGFloat = 1
 
     init(store: UsageStore, onPreferredSizeChange: @escaping (NSSize) -> Void = { _ in }) {
@@ -22,6 +23,7 @@ struct MeterView: View {
                 Divider()
                 ScrollView {
                     panelSections
+                        .padding(.bottom, 8)
                         .fixedSize(horizontal: false, vertical: true)
                         .background {
                             GeometryReader { geometry in
@@ -61,7 +63,7 @@ struct MeterView: View {
 
     private var maximumPanelHeight: CGFloat {
         let screenHeight = NSScreen.main?.visibleFrame.height ?? 900
-        return min(700, max(260, screenHeight * 0.82 - 82))
+        return max(260, screenHeight * 0.82 - 82)
     }
 
     private var panelSections: some View {
@@ -87,7 +89,9 @@ struct MeterView: View {
                     .lineLimit(1)
             }
             Spacer()
-            accountMenu
+            if store.accounts.count > 1 {
+                accountMenu
+            }
             VStack(spacing: 1) {
                 Button {
                     Task {
@@ -129,20 +133,6 @@ struct MeterView: View {
                         }
                     }
                     .disabled(account.id == store.activeAccountID)
-                }
-            }
-            Divider()
-            Button("Add account…", systemImage: "person.badge.plus") {
-                store.addAccount()
-            }
-            let removableAccounts = store.accounts.filter { $0.homePath != nil }
-            if !removableAccounts.isEmpty {
-                Menu("Delete account", systemImage: "trash") {
-                    ForEach(removableAccounts) { account in
-                        Button(account.displayName, role: .destructive) {
-                            store.deleteAccount(id: account.id)
-                        }
-                    }
                 }
             }
         } label: {
@@ -348,6 +338,8 @@ struct MeterView: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            accountSettings
+            Divider()
             HStack {
                 Text("Menu bar")
                     .font(.system(size: 12))
@@ -395,6 +387,45 @@ struct MeterView: View {
             credits
         }
         .padding(.top, 10)
+    }
+
+    private var accountSettings: some View {
+        DisclosureGroup("Accounts", isExpanded: $accountsExpanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(store.accounts) { account in
+                    HStack(spacing: 10) {
+                        Text(account.displayName)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 8)
+                        if account.id == store.activeAccountID {
+                            Text("Viewing")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                        if account.homePath != nil {
+                            Button(role: .destructive) {
+                                store.deleteAccount(id: account.id)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Delete \(account.displayName)")
+                            .accessibilityLabel("Delete \(account.displayName)")
+                        }
+                    }
+                }
+                Button("Add account…", systemImage: "person.badge.plus") {
+                    store.addAccount()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+            }
+            .padding(.top, 8)
+            .font(.system(size: 11))
+        }
+        .font(.system(size: 12))
     }
 
     private var updates: some View {
@@ -644,15 +675,11 @@ private struct ThisMacActivityView: View {
                     .stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
                     .frame(width: 14, height: 2)
                     .accessibilityHidden(true)
-                    Text("Weekly quota reset")
+                    Text("Credit reset")
                 }
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-            }
-            if activity.summarizedLargeFiles > 0 {
-                Text("Includes partial logs")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                .help("Marks days when the weekly usage allowance reset.")
             }
 
             if let selectedDay, let hours = selectedDay.hours,
@@ -704,7 +731,7 @@ private struct ThisMacActivityView: View {
                     RuleMark(x: .value("Day after reset", nextDay))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
                         .foregroundStyle(Color.secondary)
-                        .accessibilityLabel("Weekly quota reset")
+                        .accessibilityLabel("Credit reset")
                         .accessibilityValue(day.formatted(date: .abbreviated, time: .omitted))
                 }
             }
@@ -749,7 +776,8 @@ private struct ThisMacActivityView: View {
     }
 
     private func intradayActivity(for day: DailyTokenUsage, hours: [HourlyTokenUsage], dayEnd: Date) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let resets = Set(weeklyResetDates.filter { $0 >= day.date && $0 < dayEnd }).sorted()
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(day.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
                     .fontWeight(.semibold)
@@ -769,22 +797,34 @@ private struct ThisMacActivityView: View {
             }
 
             if hours.isEmpty {
-                Text("No activity recorded on this Mac for this day.")
+                Text("No activity found in this Mac’s logs for this day.")
                     .foregroundStyle(.secondary)
-            } else {
-                Text("Tokens per hour")
-                    .foregroundStyle(.secondary)
-                Chart(hours) { hour in
-                    if let interval = Calendar.current.dateInterval(of: .hour, for: hour.date) {
-                        RectangleMark(
-                            xStart: .value("Hour start", max(day.date, hour.date)),
-                            xEnd: .value("Hour end", min(dayEnd, interval.end)),
-                            yStart: .value("Zero", 0.0),
-                            yEnd: .value("Tokens", Double(hour.usage.totalTokens))
-                        )
-                        .foregroundStyle(Color.accentColor)
-                        .accessibilityLabel(hour.date.formatted(.dateTime.hour().minute().timeZone(.specificName(.short))))
-                        .accessibilityValue("\(hour.usage.totalTokens.formatted()) tokens")
+            }
+            if !hours.isEmpty || !resets.isEmpty {
+                if !hours.isEmpty {
+                    Text("Tokens per hour")
+                        .foregroundStyle(.secondary)
+                }
+                Chart {
+                    ForEach(hours) { hour in
+                        if let interval = Calendar.current.dateInterval(of: .hour, for: hour.date) {
+                            RectangleMark(
+                                xStart: .value("Hour start", max(day.date, hour.date)),
+                                xEnd: .value("Hour end", min(dayEnd, interval.end)),
+                                yStart: .value("Zero", 0.0),
+                                yEnd: .value("Tokens", Double(hour.usage.totalTokens))
+                            )
+                            .foregroundStyle(Color.accentColor)
+                            .accessibilityLabel(hour.date.formatted(.dateTime.hour().minute().timeZone(.specificName(.short))))
+                            .accessibilityValue("\(hour.usage.totalTokens.formatted()) tokens")
+                        }
+                    }
+                    ForEach(resets, id: \.self) { reset in
+                        RuleMark(x: .value("Credit reset", reset))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                            .foregroundStyle(Color.secondary)
+                            .accessibilityLabel("Credit reset")
+                            .accessibilityValue(reset.formatted(.dateTime.hour().minute().timeZone(.specificName(.short))))
                     }
                 }
                 .chartXScale(domain: day.date...dayEnd)
@@ -794,23 +834,24 @@ private struct ThisMacActivityView: View {
                     }
                 }
                 .chartYAxis {
-                    AxisMarks(values: .automatic(desiredCount: 3)) { tick in
-                        AxisGridLine()
-                        AxisValueLabel {
-                            if let value = tick.as(Double.self), let tokens = Int64(exactly: value) {
-                                Text(compactTokens(tokens))
+                    if !hours.isEmpty {
+                        AxisMarks(values: .automatic(desiredCount: 3)) { tick in
+                            AxisGridLine()
+                            AxisValueLabel {
+                                if let value = tick.as(Double.self), let tokens = Int64(exactly: value) {
+                                    Text(compactTokens(tokens))
+                                }
                             }
                         }
                     }
                 }
-                .frame(height: 104)
-                .accessibilityLabel("Tokens per hour recorded on this Mac")
+                .frame(height: hours.isEmpty ? 48 : 104)
+                .accessibilityLabel(hours.isEmpty ? "Credit reset timeline" : "Tokens per hour recorded on this Mac")
             }
 
-            if activity.summarizedLargeFiles > 0 {
-                Text("Some logs are partial, so blank hours may be incomplete.")
+            ForEach(resets, id: \.self) { reset in
+                Text("Credit reset at \(reset.formatted(date: .omitted, time: .shortened))")
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .font(.system(size: 11))
@@ -826,7 +867,7 @@ private struct ThisMacActivityView: View {
             .foregroundStyle(.secondary)
 
             if activity.summarizedLargeFiles > 0 {
-                Text("Only recent entries were read from \(activity.summarizedLargeFiles) large logs. Totals may be incomplete.")
+                Text("Meter reads the newest part of large session logs, so earlier activity may be missing.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -850,7 +891,7 @@ private struct ThisMacActivityView: View {
                 .foregroundStyle(Color.accentColor)
             }
             ForEach(resetDays, id: \.self) { day in
-                LabeledContent("Weekly quota reset", value: day.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("Credit reset", value: day.formatted(date: .abbreviated, time: .omitted))
             }
         }
     }
@@ -870,7 +911,7 @@ private struct ThisMacActivityView: View {
             "\(day.date.formatted(.dateTime.weekday(.wide))): \(day.usage.totalTokens) tokens"
         }
         let resets = resetDays.map { day in
-            "Weekly quota reset on \(day.formatted(date: .abbreviated, time: .omitted))"
+            "Credit reset on \(day.formatted(date: .abbreviated, time: .omitted))"
         }
         return (dailyTotals + resets).joined(separator: ", ")
     }
